@@ -84,9 +84,151 @@ async function startServer() {
     });
   });
 
+  // Admin Signup API (Telegram ID, Username, Name, Gmail, Password)
+  app.post("/api/admin/auth/signup", (req, res) => {
+    try {
+      const { telegramId, username, name, email, password, role } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ success: false, error: "জিমেইল ও পাসওয়ার্ড দেওয়া আবশ্যক।" });
+      }
+
+      if (!telegramId && !username) {
+        return res.status(400).json({ success: false, error: "টেলিগ্রাম আইডি অথবা ইউজারনেম আবশ্যক।" });
+      }
+
+      const cleanTgId = telegramId ? normalizeBengaliDigits(String(telegramId)).replace(/\D/g, "") : "";
+      const cleanUsername = username ? String(username).trim().replace(/^@+/, "") : "";
+      const cleanEmail = String(email).trim().toLowerCase();
+      const cleanPassword = String(password).trim();
+
+      const existingAdmins = getAuthorizedAdmins();
+      // Check if email already registered
+      const existingEmail = existingAdmins.find(
+        (a) => a.email && a.email.toLowerCase() === cleanEmail
+      );
+      if (existingEmail) {
+        // Update password & credentials if already registered
+        existingEmail.telegramId = cleanTgId || existingEmail.telegramId;
+        existingEmail.username = cleanUsername || existingEmail.username;
+        existingEmail.name = name?.trim() || existingEmail.name;
+        existingEmail.password = cleanPassword;
+        existingEmail.isActive = true;
+        const updated = addAuthorizedAdmin(existingEmail);
+        return res.json({
+          success: true,
+          admin: { ...existingEmail, password: "" },
+          message: "অ্যাকাউন্টের তথ্য ও পাসওয়ার্ড আপডেট হয়েছে!"
+        });
+      }
+
+      const newAdmin: AdminController = {
+        id: `admin_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        name: (name?.trim()) || (cleanUsername ? `@${cleanUsername}` : `Admin ${cleanTgId}`),
+        telegramId: cleanTgId,
+        username: cleanUsername,
+        email: cleanEmail,
+        password: cleanPassword,
+        role: role === "controller" ? "controller" : "super_admin",
+        addedAt: new Date().toLocaleDateString("bn-BD", { day: "numeric", month: "long", year: "numeric" }),
+        isActive: true,
+        notes: "ওয়েব অ্যাডমিন প্যানেল থেকে সাইন আপ করা সুপার অ্যাডমিন"
+      };
+
+      const updated = addAuthorizedAdmin(newAdmin);
+      res.json({
+        success: true,
+        admins: updated,
+        admin: { ...newAdmin, password: "" },
+        message: "সুপার অ্যাডমিন অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!"
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  // Admin Login API (Gmail & Password)
+  app.post("/api/admin/auth/login", (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ success: false, error: "জিমেইল এবং পাসওয়ার্ড লিখুন।" });
+      }
+
+      const cleanEmail = String(email).trim().toLowerCase();
+      const cleanPassword = String(password).trim();
+      const admins = getAuthorizedAdmins();
+
+      // Find matching admin by email and password
+      const matched = admins.find(
+        (a) => a.email && a.email.toLowerCase() === cleanEmail && a.password === cleanPassword
+      );
+
+      // Default fallback master admin login if first time
+      if (!matched && cleanEmail === "admin@gmail.com" && cleanPassword === "admin123") {
+        const defaultAdmin = admins[0] || {
+          id: "admin-1",
+          name: "Super Admin",
+          telegramId: "7297762323",
+          username: "LiveAdmin",
+          role: "super_admin",
+          email: "admin@gmail.com",
+          password: "admin123",
+          addedAt: "মাস্টার অ্যাকাউন্ট",
+          isActive: true
+        };
+        return res.json({
+          success: true,
+          admin: { ...defaultAdmin, password: "" }
+        });
+      }
+
+      if (!matched) {
+        return res.status(401).json({
+          success: false,
+          error: "ভুল জিমেইল অথবা পাসওয়ার্ড! অনুগ্রহ করে সঠিক তথ্য দিন বা সাইন আপ করুন।"
+        });
+      }
+
+      if (!matched.isActive) {
+        return res.status(403).json({
+          success: false,
+          error: "আপনার অ্যাডমিন এক্সেস বর্তমানে নিষ্ক্রিয় রয়েছে।"
+        });
+      }
+
+      res.json({
+        success: true,
+        admin: { ...matched, password: "" }
+      });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  // Current Admin Session Verification
+  app.get("/api/admin/auth/me", (req, res) => {
+    const authHeader = req.headers.authorization;
+    const adminId = req.query.adminId as string;
+    const admins = getAuthorizedAdmins();
+
+    if (adminId) {
+      const found = admins.find((a) => a.id === adminId && a.isActive);
+      if (found) {
+        return res.json({ success: true, admin: { ...found, password: "" } });
+      }
+    }
+
+    if (admins.length > 0) {
+      return res.json({ success: true, hasAdmins: true });
+    }
+
+    res.json({ success: false, hasAdmins: false });
+  });
+
   app.post("/api/admins", (req, res) => {
     try {
-      const { name, telegramId, username, role, notes } = req.body;
+      const { name, telegramId, username, role, notes, email, password } = req.body;
       if (!telegramId && !username) {
         return res.status(400).json({ success: false, error: "টেলিগ্রাম আইডি অথবা ইউজারনেম আবশ্যক।" });
       }
@@ -99,6 +241,8 @@ async function startServer() {
         name: (name?.trim()) || (cleanUsername ? `@${cleanUsername}` : `Controller ${cleanTgId}`),
         telegramId: cleanTgId,
         username: cleanUsername,
+        email: email ? String(email).trim().toLowerCase() : undefined,
+        password: password ? String(password).trim() : undefined,
         role: role === "super_admin" ? "super_admin" : "controller",
         addedAt: new Date().toLocaleDateString("bn-BD", { day: "numeric", month: "long", year: "numeric" }),
         isActive: true,

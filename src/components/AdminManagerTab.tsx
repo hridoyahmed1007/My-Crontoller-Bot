@@ -31,6 +31,8 @@ export function AdminManagerTab() {
   const [newName, setNewName] = useState('');
   const [newTelegramId, setNewTelegramId] = useState('');
   const [newUsername, setNewUsername] = useState('');
+  const [newEmail, setNewEmail] = useState('');
+  const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'super_admin' | 'controller'>('controller');
   const [newNotes, setNewNotes] = useState('');
 
@@ -87,6 +89,8 @@ export function AdminManagerTab() {
           name: newName,
           telegramId: newTelegramId,
           username: newUsername,
+          email: newEmail,
+          password: newPassword,
           role: newRole,
           notes: newNotes,
         })
@@ -98,6 +102,8 @@ export function AdminManagerTab() {
         setNewName('');
         setNewTelegramId('');
         setNewUsername('');
+        setNewEmail('');
+        setNewPassword('');
         setNewNotes('');
         setStatusMessage({
           type: 'success',
@@ -309,6 +315,38 @@ export function AdminManagerTab() {
                   onChange={(e) => setNewName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                 />
+              </div>
+
+              {/* Email & Password for Web Login */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                    <span>জিমেইল / ইমেইল</span>
+                    <span className="text-[10px] text-slate-400">ঐচ্ছিক</span>
+                  </label>
+                  <input
+                    id="input-admin-email"
+                    type="email"
+                    placeholder="admin@gmail.com"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                    <span>লগইন পাসওয়ার্ড</span>
+                    <span className="text-[10px] text-slate-400">ঐচ্ছিক</span>
+                  </label>
+                  <input
+                    id="input-admin-password"
+                    type="password"
+                    placeholder="পাসওয়ার্ড দিন..."
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-3 py-2 text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none focus:border-blue-500 font-mono"
+                  />
+                </div>
               </div>
 
               {/* Role selection */}
@@ -585,6 +623,13 @@ export function AdminManagerTab() {
                                   <span className="font-mono">@{cleanUname}</span>
                                   <ExternalLink className="w-2.5 h-2.5 opacity-70" />
                                 </a>
+                              )}
+
+                              {admin.email && (
+                                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800 text-emerald-400">
+                                  <span className="text-[10px] text-slate-400">Gmail:</span>
+                                  <span className="font-mono text-[11px]">{admin.email}</span>
+                                </div>
                               )}
 
                               {admin.addedAt && (

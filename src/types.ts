@@ -3,6 +3,8 @@ export interface AdminController {
   name: string;
   telegramId: string;
   username?: string;
+  email?: string;
+  password?: string;
   role: 'super_admin' | 'controller';
   addedAt: string;
   isActive: boolean;

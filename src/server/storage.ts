@@ -6,6 +6,8 @@ export interface AdminController {
   name: string;
   telegramId: string;
   username?: string;
+  email?: string;
+  password?: string;
   role: "super_admin" | "controller";
   addedAt: string;
   isActive: boolean;
@@ -170,6 +172,43 @@ export function toggleAdminStatusPermanently(id: string, currentAdmins: AdminCon
   return updatedList;
 }
 
+// Default Permanent Telegram Accounts with full MTProto Production Sessions
+const DEFAULT_PERMANENT_ACCOUNTS: AccountSession[] = [
+  {
+    id: "3",
+    phone: "+8801891969352",
+    name: "Mariya Akter",
+    username: "moriom12308",
+    telegramId: 7277720986,
+    avatarUrl: "https://t.me/i/userpic/320/moriom12308.jpg",
+    sessionString: "1BQANOTEuMTA4LjU2LjEyNAG7mRR5eWW2J1KXOShlAlX0AKG/jDfhG6WWF7iaM4Qq1mQw9EmWdNfzIelbdxgda+Mo0VuU4ZAe4jQYbMabrsgOtaAf96MhvxHnlZZ2gnNjl26Ie+OcPcj2qSl4LKWt9t/aNltdAFNeBIxjXAxhX5iwSY9Vnvn98lJZWa/6gc2AuLptXpeIIibp48Kye99U5619jjIz7WwPTKWPBldf3rrMsf2uFal594towpOS4Kg0p+LBB7Vph8+4ZcfySCwbp+fTVHiHWf2Q7sKzqcAoIeRHelCW5cr3HxhDWSxuyH6j8XGg68c6o0uCmF32LiotfI7VuuhKeEfUz+vsZCnPnbcNjw==",
+    status: "idle",
+    verifiedAt: "MTProto Live Verified"
+  },
+  {
+    id: "2",
+    phone: "+8801917691524",
+    name: "Tahsan Ahmed",
+    username: "Tahsan_Ahmed12",
+    telegramId: 8552972620,
+    avatarUrl: "https://t.me/i/userpic/320/Tahsan_Ahmed12.jpg",
+    sessionString: "1BQANOTEuMTA4LjU2LjEyNAG7blUG2qR3lxmqmVy0bRulv1flTYMWZgZZ+PH9Sj5xT5cX6PVJi/Zck67r5s0J6qWB1kElQ9/ooJxV5v286lXtSfOvvjOTR7AJD8wOePQm4Opt/iodnrBpcjodoB57ZmmsDGhKGmlACk40Wo3ZNXROMfU+zQNjrps+KkqoLry9J6R17iFNfAnBIBKAD0QAtq8irJ91o98Yv9An1RVpkF72gf+oiPb33chcNYAbebzIvfen97MQYCujE/YLtv688aAfBqWIfbc84RFoW8sIt+e3FxjMv60n8JdKBMBAhtQ8qX6lOX21cT+9+Z1/hCT5JLRiaVCv8PA4UFZGo+9O4fRDkw==",
+    status: "idle",
+    verifiedAt: "MTProto Live Verified"
+  },
+  {
+    id: "1",
+    phone: "+8801761623922",
+    name: "Habib Hasan",
+    username: "habib20863",
+    telegramId: 7297762323,
+    avatarUrl: "https://t.me/i/userpic/320/habib20863.jpg",
+    sessionString: "1BQANOTEuMTA4LjU2LjEyNAG7QqmiZU6mtkgnZejpf14DS/kgzRCVoLFv0nIr/Pma6KwWF/ScqYp+yJf0eRMFgm7cfqzt6AjPaLOA/pyCrsw6FW0uNcpkeKnXVd+Tcg9x+je7RG9g4wO3lnjr9H89NeOVs0NOiy+21VkqCe8eKbOfXMYjnVCV2RO8GW8614I2RuHm1rfAdyeghrBTua1DTPUjuv1Ab7tTX7lynPF8rmpQ4KJgByCTWNHAqwir4roN3mYq1mJSIy5euX1yqZtTTYpf3hxBU9vNwHA9738pbjMhjwE4QohY5jx6JeWuMQPTYGHgPFAz51NXNV28gaE6pCUd+Th4dyGxH8zBnfyWho6/WQ==",
+    status: "idle",
+    verifiedAt: "MTProto Live Verified"
+  }
+];
+
 // Load saved Telegram accounts from disk
 export function loadPersistedAccounts(): AccountSession[] {
   ensureDataDir();
@@ -205,7 +244,11 @@ export function loadPersistedAccounts(): AccountSession[] {
   } catch (err) {
     console.error("[Storage] Error loading accounts from file:", err);
   }
-  return [];
+
+  // Seed default permanent accounts and write to disk
+  console.log(`[Storage] Initializing ${DEFAULT_PERMANENT_ACCOUNTS.length} permanent seed accounts.`);
+  savePersistedAccounts(DEFAULT_PERMANENT_ACCOUNTS);
+  return DEFAULT_PERMANENT_ACCOUNTS;
 }
 
 // Save all accounts safely to disk with backup redundancy

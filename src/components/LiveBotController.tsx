@@ -36,8 +36,8 @@ export const LiveBotController: React.FC<LiveBotControllerProps> = ({
   isLiveActive,
   liveTarget,
 }) => {
-  const [botToken, setBotToken] = useState("8880348707:AAEpnZBn_rZy1cZvEPag6IG_Wj7_nT72mzI");
-  const [adminId, setAdminId] = useState("7297762323");
+  const [botToken, setBotToken] = useState("8927823094:AAE2MDXcyZBKpLpFuz-K9u66fLTqPLdx5o8");
+  const [adminId, setAdminId] = useState("SuperAdmin");
   const [botStatus, setBotStatus] = useState<any>({
     isRunning: true,
     botInfo: { id: 8880348707, first_name: "Live Multi-Account Bot", username: "LiveMultiAccBot" },

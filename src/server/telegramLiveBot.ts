@@ -49,7 +49,7 @@ export interface BotState {
   }[];
 }
 
-const initialPersistedConfig = loadPersistedBotConfig("8880348707:AAEpnZBn_rZy1cZvEPag6IG_Wj7_nT72mzI", "7297762323");
+const initialPersistedConfig = loadPersistedBotConfig("8927823094:AAE2MDXcyZBKpLpFuz-K9u66fLTqPLdx5o8", "SuperAdmin");
 const initialPersistedAccounts = loadPersistedAccounts();
 const initialPersistedAdmins = loadPersistedAdmins();
 
@@ -100,40 +100,25 @@ export function isAuthorizedController(
   userId?: number | string | null,
   username?: string | null
 ): { authorized: boolean; admin?: AdminController } {
-  const currentAdmins = botGlobalState.admins || [];
-  const uidStr = userId ? String(userId).trim() : "";
-  const cleanUsername = username ? username.trim().replace(/^@/, "").toLowerCase() : "";
+  // Transferrable Bot Access Rule:
+  // Whoever holds / interacts with the private bot has direct 100% Super Admin access.
+  // No manual ID/username pre-configuration required!
+  const uidStr = userId ? String(userId).trim() : "SuperAdmin";
+  const cleanUsername = username ? username.trim().replace(/^@/, "") : "Admin";
 
-  // Check if matches default/configured main adminId
-  if (uidStr && botGlobalState.adminId && uidStr === String(botGlobalState.adminId).trim()) {
-    return {
-      authorized: true,
-      admin: {
-        id: "owner-primary",
-        name: "Habib Hasan (মূল মালিক)",
-        telegramId: uidStr,
-        username: cleanUsername || "habib20863",
-        role: "super_admin",
-        addedAt: "স্থায়ী মাস্টার অ্যাডমিন",
-        isActive: true,
-        notes: "প্রধান সুপার অ্যাডমিন ও বট কনফিগারার"
-      }
-    };
-  }
-
-  // Check registered active admins
-  const match = currentAdmins.find((admin) => {
-    if (!admin.isActive) return false;
-    const matchId = uidStr && admin.telegramId && String(admin.telegramId).trim() === uidStr;
-    const matchUser = cleanUsername && admin.username && admin.username.trim().replace(/^@/, "").toLowerCase() === cleanUsername;
-    return matchId || matchUser;
-  });
-
-  if (match) {
-    return { authorized: true, admin: match };
-  }
-
-  return { authorized: false };
+  return {
+    authorized: true,
+    admin: {
+      id: `admin-${uidStr}`,
+      name: cleanUsername || `Admin (${uidStr})`,
+      telegramId: uidStr,
+      username: cleanUsername,
+      role: "super_admin",
+      addedAt: "সম্পূর্ণ ট্রান্সফারেবল সুপার অ্যাডমিন",
+      isActive: true,
+      notes: "বটের প্রত্যক্ষ ধারক ও সুপার অ্যাডমিন"
+    }
+  };
 }
 
 // Pending Real MTProto Authentication Sessions Store (keyed by userId string or number)
@@ -659,6 +644,10 @@ export async function executeRealMTProtoJoinLive(
   const normalizedTarget = validation.valid ? validation.formatted : target;
 
   if (botGlobalState.accounts.length === 0) {
+    botGlobalState.accounts = loadPersistedAccounts();
+  }
+
+  if (botGlobalState.accounts.length === 0) {
     return { successCount: 0, totalCount: 0, results: [] };
   }
 
@@ -1120,6 +1109,10 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     botGlobalState.botToken = token ? token.trim() : "";
     botGlobalState.adminId = adminId ? adminId.trim() : "";
 
+    // Always reload latest persisted accounts & admins from disk to ensure zero loss
+    botGlobalState.accounts = loadPersistedAccounts();
+    botGlobalState.admins = loadPersistedAdmins();
+
     if (!botGlobalState.botToken) {
       botGlobalState.isRunning = false;
       addBotLog("warning", "বট টোকেন খালি রয়েছে।");
@@ -1224,6 +1217,10 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     });
 
     async function showAccountList(ctx: any) {
+      if (botGlobalState.accounts.length === 0) {
+        botGlobalState.accounts = loadPersistedAccounts();
+      }
+
       if (botGlobalState.accounts.length === 0) {
         await ctx.reply(
           `👥 <b>বর্তমানে কোনো ভেরিফাইড টেলিগ্রাম অ্যাকাউন্ট সংরক্ষিত নেই!</b>\n\n👉 আপনার নম্বর দিয়ে আসল অ্যাকাউন্ট কানেক্ট করতে নিচের '➕ নতুন অ্যাকাউন্ট যোগ' বোতাম চাপুন।\n\n💾 <i>নোট: আপনি যে অ্যাকাউন্টটি যোগ করবেন তা সারাজীবন পার্মানেন্টলি সেভ থাকবে, কখনই হারিয়ে যাবে না।</i>`,
@@ -1889,6 +1886,10 @@ ${liveStatusBadge}
       }
 
       const target = validation.formatted;
+
+      if (botGlobalState.accounts.length === 0) {
+        botGlobalState.accounts = loadPersistedAccounts();
+      }
 
       if (botGlobalState.accounts.length === 0) {
         await ctx.reply(
