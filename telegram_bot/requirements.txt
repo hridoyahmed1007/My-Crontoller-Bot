@@ -1,0 +1,8 @@
+pyrogram==2.0.106
+tgcrypto==1.2.5
+pytgcalls==3.0.0.dev24
+python-dotenv==1.0.1
+aiohttp==3.11.11
+requests==2.32.3
+pydantic==2.10.6
+asyncio

@@ -1,0 +1,6 @@
+{
+  "name": "Telegram Live Multi-Account Manager",
+  "description": "Comprehensive Telegram UserBot & Multi-Account Live Stream Automation Controller, Session Manager, and Pyrogram/Telethon Code Studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
