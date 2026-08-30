@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import {
   initAndStartTelegramBot,
+  stopActiveTelegramBot,
   botGlobalState,
   addBotLog,
   executeRealMTProtoJoinLive,
@@ -84,7 +85,28 @@ async function startServer() {
     });
   });
 
-  // Admin Signup API (Telegram ID, Username, Name, Gmail, Password)
+  // Authorized Admins API
+  app.get("/api/admins", (_req, res) => {
+    const admins = getAuthorizedAdmins();
+    res.json({
+      success: true,
+      admins
+    });
+  });
+
+  const MASTER_SUPER_ADMIN: AdminController = {
+    id: "admin-super-owner",
+    name: "offline",
+    telegramId: "7983626971",
+    username: "Thebossbd360",
+    email: "anarulislamai1020@gmail.com",
+    role: "super_admin",
+    addedAt: "২৯ আগস্ট, ২০২৬",
+    isActive: true,
+    notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
+  };
+
+  // Admin Signup API - STRICTLY LOCKED to Master Owner
   app.post("/api/admin/auth/signup", (req, res) => {
     try {
       const { telegramId, username, name, email, password, role } = req.body;
@@ -93,61 +115,53 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "জিমেইল ও পাসওয়ার্ড দেওয়া আবশ্যক।" });
       }
 
-      if (!telegramId && !username) {
-        return res.status(400).json({ success: false, error: "টেলিগ্রাম আইডি অথবা ইউজারনেম আবশ্যক।" });
-      }
-
       const cleanTgId = telegramId ? normalizeBengaliDigits(String(telegramId)).replace(/\D/g, "") : "";
-      const cleanUsername = username ? String(username).trim().replace(/^@+/, "") : "";
+      const cleanUsername = username ? String(username).trim().replace(/^@+/, "").toLowerCase() : "";
       const cleanEmail = String(email).trim().toLowerCase();
       const cleanPassword = String(password).trim();
 
-      const existingAdmins = getAuthorizedAdmins();
-      // Check if email already registered
-      const existingEmail = existingAdmins.find(
-        (a) => a.email && a.email.toLowerCase() === cleanEmail
-      );
-      if (existingEmail) {
-        // Update password & credentials if already registered
-        existingEmail.telegramId = cleanTgId || existingEmail.telegramId;
-        existingEmail.username = cleanUsername || existingEmail.username;
-        existingEmail.name = name?.trim() || existingEmail.name;
-        existingEmail.password = cleanPassword;
-        existingEmail.isActive = true;
-        const updated = addAuthorizedAdmin(existingEmail);
-        return res.json({
-          success: true,
-          admin: { ...existingEmail, password: "" },
-          message: "অ্যাকাউন্টের তথ্য ও পাসওয়ার্ড আপডেট হয়েছে!"
+      // SECURITY CHECK: Strictly allow only Master Owner credentials
+      const isMasterEmail = cleanEmail === "anarulislamai1020@gmail.com";
+      const isMasterId = cleanTgId === "7983626971";
+      const isMasterUsername = cleanUsername === "thebossbd360";
+
+      if (!isMasterEmail && !isMasterId && !isMasterUsername) {
+        return res.status(403).json({
+          success: false,
+          error: "⛔ অ্যাক্সেস অস্বীকৃত! এই প্যানেলে নতুন ব্যবহারকারী সাইন আপ বন্ধ রয়েছে। শুধুমাত্র মূল সুপার অ্যাডমিন (@Thebossbd360) ছাড়া অন্য কেউ প্রবেশ বা অ্যাকাউন্ট তৈরি করতে পারবে না।"
         });
       }
 
-      const newAdmin: AdminController = {
-        id: `admin_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        name: (name?.trim()) || (cleanUsername ? `@${cleanUsername}` : `Admin ${cleanTgId}`),
-        telegramId: cleanTgId,
-        username: cleanUsername,
-        email: cleanEmail,
-        password: cleanPassword,
-        role: role === "controller" ? "controller" : "super_admin",
-        addedAt: new Date().toLocaleDateString("bn-BD", { day: "numeric", month: "long", year: "numeric" }),
-        isActive: true,
-        notes: "ওয়েব অ্যাডমিন প্যানেল থেকে সাইন আপ করা সুপার অ্যাডমিন"
-      };
+      const existingAdmins = getAuthorizedAdmins();
+      const masterRecord = existingAdmins.find(
+        (a) =>
+          (a.email && a.email.toLowerCase() === "anarulislamai1020@gmail.com") ||
+          a.telegramId === "7983626971" ||
+          (a.username && a.username.toLowerCase() === "thebossbd360")
+      ) || MASTER_SUPER_ADMIN;
 
-      const updated = addAuthorizedAdmin(newAdmin);
+      masterRecord.name = (name?.trim()) || masterRecord.name || "offline";
+      masterRecord.telegramId = cleanTgId || masterRecord.telegramId || "7983626971";
+      masterRecord.username = cleanUsername || masterRecord.username || "Thebossbd360";
+      masterRecord.email = cleanEmail || "anarulislamai1020@gmail.com";
+      masterRecord.password = cleanPassword;
+      masterRecord.role = "super_admin";
+      masterRecord.isActive = true;
+
+      const updated = addAuthorizedAdmin(masterRecord);
+
       res.json({
         success: true,
         admins: updated,
-        admin: { ...newAdmin, password: "" },
-        message: "সুপার অ্যাডমিন অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে!"
+        admin: { ...masterRecord, password: "" },
+        message: "👑 সুপার অ্যাডমিন পাসওয়ার্ড ও অ্যাকাউন্ট সফলভাবে আপডেট হয়েছে!"
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || String(err) });
     }
   });
 
-  // Admin Login API (Gmail & Password)
+  // Admin Login API - Strictly Verified (Web Panel Access is Exclusive to Super Admin)
   app.post("/api/admin/auth/login", (req, res) => {
     try {
       const { email, password } = req.body;
@@ -155,51 +169,41 @@ async function startServer() {
         return res.status(400).json({ success: false, error: "জিমেইল এবং পাসওয়ার্ড লিখুন।" });
       }
 
-      const cleanEmail = String(email).trim().toLowerCase();
+      const cleanInput = String(email).trim().toLowerCase();
       const cleanPassword = String(password).trim();
       const admins = getAuthorizedAdmins();
 
-      // Find matching admin by email and password
-      const matched = admins.find(
-        (a) => a.email && a.email.toLowerCase() === cleanEmail && a.password === cleanPassword
-      );
+      // Check Master Owner credentials
+      const isMasterEmail = cleanInput === "anarulislamai1020@gmail.com";
+      const isMasterUname = cleanInput === "thebossbd360" || cleanInput === "@thebossbd360";
+      const isMasterId = cleanInput === "7983626971";
 
-      // Default fallback master admin login if first time
-      if (!matched && cleanEmail === "admin@gmail.com" && cleanPassword === "admin123") {
-        const defaultAdmin = admins[0] || {
-          id: "admin-1",
-          name: "Super Admin",
-          telegramId: "7297762323",
-          username: "LiveAdmin",
-          role: "super_admin",
-          email: "admin@gmail.com",
-          password: "admin123",
-          addedAt: "মাস্টার অ্যাকাউন্ট",
-          isActive: true
-        };
-        return res.json({
-          success: true,
-          admin: { ...defaultAdmin, password: "" }
-        });
-      }
+      const masterAdmin = admins.find(
+        (a) =>
+          a.telegramId === "7983626971" ||
+          (a.username && a.username.toLowerCase() === "thebossbd360") ||
+          (a.email && a.email.toLowerCase() === "anarulislamai1020@gmail.com")
+      ) || MASTER_SUPER_ADMIN;
 
-      if (!matched) {
-        return res.status(401).json({
-          success: false,
-          error: "ভুল জিমেইল অথবা পাসওয়ার্ড! অনুগ্রহ করে সঠিক তথ্য দিন বা সাইন আপ করুন।"
-        });
-      }
-
-      if (!matched.isActive) {
+      // Strictly deny any attempt if not the verified master super admin
+      if (!isMasterEmail && !isMasterUname && !isMasterId) {
         return res.status(403).json({
           success: false,
-          error: "আপনার অ্যাডমিন এক্সেস বর্তমানে নিষ্ক্রিয় রয়েছে।"
+          error: "⛔ অ্যাক্সেস অস্বীকৃত! আপনি এই অ্যাডমিন প্যানেলে লগইন করার অনুমতিপ্রাপ্ত নন। শুধুমাত্র মূল সুপার অ্যাডমিন (@Thebossbd360) এখানে প্রবেশ করতে পারবেন।"
+        });
+      }
+
+      // Check password if set on master admin
+      if (masterAdmin.password && masterAdmin.password !== cleanPassword) {
+        return res.status(401).json({
+          success: false,
+          error: "⛔ ভুল পাসওয়ার্ড! সঠিক সুপার অ্যাডমিন পাসওয়ার্ড প্রদান করুন।"
         });
       }
 
       res.json({
         success: true,
-        admin: { ...matched, password: "" }
+        admin: { ...masterAdmin, password: "" }
       });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || String(err) });
@@ -208,7 +212,6 @@ async function startServer() {
 
   // Current Admin Session Verification
   app.get("/api/admin/auth/me", (req, res) => {
-    const authHeader = req.headers.authorization;
     const adminId = req.query.adminId as string;
     const admins = getAuthorizedAdmins();
 
@@ -219,11 +222,9 @@ async function startServer() {
       }
     }
 
-    if (admins.length > 0) {
-      return res.json({ success: true, hasAdmins: true });
-    }
-
-    res.json({ success: false, hasAdmins: false });
+    // Default to Master Owner
+    const masterAdmin = admins.find((a) => a.telegramId === "7983626971") || MASTER_SUPER_ADMIN;
+    res.json({ success: true, admin: { ...masterAdmin, password: "" } });
   });
 
   app.post("/api/admins", (req, res) => {
@@ -284,6 +285,18 @@ async function startServer() {
 
     const result = await initAndStartTelegramBot(botTokenToUse, adminIdToUse);
     res.json(result);
+  });
+
+  // Stop Telegram Bot
+  app.post("/api/bot/stop", async (_req, res) => {
+    try {
+      await stopActiveTelegramBot();
+      botGlobalState.isRunning = false;
+      addBotLog("info", "🛑 টেলিগ্রাম বট সাময়িকভাবে বন্ধ করা হয়েছে।");
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
   });
 
   // Web-based Direct MTProto Send Code
@@ -628,6 +641,16 @@ Do not add markdown backticks if possible, just raw JSON array or simple text.`;
         }
       })
       .catch((err) => console.error("Error auto-starting Telegram bot:", err));
+    process.once("SIGINT", async () => {
+      console.log("Shutting down bot before exit (SIGINT)...");
+      await stopActiveTelegramBot().catch(() => {});
+      process.exit(0);
+    });
+    process.once("SIGTERM", async () => {
+      console.log("Shutting down bot before exit (SIGTERM)...");
+      await stopActiveTelegramBot().catch(() => {});
+      process.exit(0);
+    });
   });
 }
 

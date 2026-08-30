@@ -16,16 +16,33 @@ import {
   Eye,
   RefreshCw,
   Info,
-  BadgeAlert
+  BadgeAlert,
+  Smartphone,
+  Radio,
+  SlidersHorizontal,
+  Server
 } from 'lucide-react';
-import { AdminController } from '../types';
+import { AdminController, TelegramAccount } from '../types';
 
-export function AdminManagerTab() {
+interface AdminManagerTabProps {
+  accounts?: TelegramAccount[];
+  onDeleteAccount?: (id: string) => void;
+  onToggleSelect?: (id: string) => void;
+  isLiveActive?: boolean;
+}
+
+export function AdminManagerTab({
+  accounts = [],
+  onDeleteAccount,
+  onToggleSelect,
+  isLiveActive = false
+}: AdminManagerTabProps) {
   const [admins, setAdmins] = useState<AdminController[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [viewSection, setViewSection] = useState<'both' | 'admins' | 'accounts'>('both');
 
   // Form inputs
   const [newName, setNewName] = useState('');
@@ -251,7 +268,48 @@ export function AdminManagerTab() {
         </div>
       )}
 
+      {/* Section Switcher Tabs */}
+      <div className="flex p-1 bg-slate-900 border border-slate-800 rounded-2xl max-w-md">
+        <button
+          type="button"
+          onClick={() => setViewSection('both')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            viewSection === 'both'
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <SlidersHorizontal className="w-3.5 h-3.5" />
+          সবগুলো ভিউ (All)
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewSection('admins')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            viewSection === 'admins'
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <ShieldCheck className="w-3.5 h-3.5" />
+          কন্ট্রোলার ({admins.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewSection('accounts')}
+          className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 ${
+            viewSection === 'accounts'
+              ? 'bg-blue-600 text-white shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Smartphone className="w-3.5 h-3.5" />
+          আসল অ্যাকাউন্ট ({accounts.length})
+        </button>
+      </div>
+
       {/* Main Grid: Add Controller Form & Controllers List */}
+      {(viewSection === 'both' || viewSection === 'admins') && (
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Left Column: Add Controller Form (5 Cols) */}
         <div className="lg:col-span-5 flex flex-col space-y-4">
@@ -697,6 +755,156 @@ export function AdminManagerTab() {
           </div>
         </div>
       </div>
+      )}
+
+      {/* Direct Connected Accounts Details in Admin Panel */}
+      {(viewSection === 'both' || viewSection === 'accounts') && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
+                <Smartphone className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+                  <span>অ্যাডমিন প্যানেল: যুক্তকৃত সকল অ্যাকাউন্টের সম্পূর্ণ ডিটেইলস</span>
+                  <span className="px-2 py-0.5 bg-blue-500/20 text-blue-300 text-xs rounded-full font-bold">
+                    {accounts.length} টি
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-400">
+                  সরাসরি অ্যাডমিন প্যানেল থেকে প্রতিটি অ্যাকাউন্টের মোবাইল নম্বর, টেলিগ্রাম ইউজার আইডি, ইউজারনেম ও লাইভ স্ট্যাটাস দেখুন
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400">
+                {isLiveActive ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse">
+                    <Radio className="w-3.5 h-3.5 text-rose-400" />
+                    লাইভ স্ট্রিমে যুক্ত আছে
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    MTProto লাইভ রেডি
+                  </span>
+                )}
+              </span>
+            </div>
+          </div>
+
+          {/* Accounts Grid */}
+          {accounts.length === 0 ? (
+            <div className="py-10 text-center border border-dashed border-slate-800 rounded-xl p-6 space-y-2">
+              <Smartphone className="w-8 h-8 text-slate-600 mx-auto" />
+              <p className="text-sm font-semibold text-slate-300">কোনো টেলিগ্রাম অ্যাকাউন্ট যুক্ত নেই</p>
+              <p className="text-xs text-slate-500">বটে /start দিন অথবা অ্যাকাউন্ট ম্যানেজারে গিয়ে নতুন নম্বর যুক্ত করুন।</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              {accounts.map((acc, idx) => {
+                return (
+                  <div
+                    key={acc.id || idx}
+                    id={`admin-account-card-${acc.id}`}
+                    className="p-4 bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-2xl flex flex-col justify-between space-y-3 transition-all"
+                  >
+                    <div className="flex items-start gap-3">
+                      <img
+                        src={acc.avatarUrl || `https://t.me/i/userpic/320/${acc.username || 'user'}.jpg`}
+                        alt={acc.name}
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(acc.name)}&background=1e293b&color=38bdf8`;
+                        }}
+                        className="w-11 h-11 rounded-full object-cover border border-slate-700 flex-shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-1">
+                          <h4 className="font-bold text-slate-100 text-sm truncate">{acc.name}</h4>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-blue-950/60 text-blue-300 border border-blue-800/40">
+                            #{idx + 1}
+                          </span>
+                        </div>
+                        {acc.username ? (
+                          <span className="text-xs text-sky-400 font-mono">
+                            @{acc.username.replace('@', '')}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500 italic">ইউজারনেম নেই</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Detailed Metadata Badges */}
+                    <div className="space-y-1.5 pt-1 border-t border-slate-800/80 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">মোবাইল নম্বর:</span>
+                        <span className="font-mono text-emerald-400 font-bold">{acc.phone}</span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">টেলিগ্রাম User ID:</span>
+                        <span className="font-mono text-sky-400 font-semibold">
+                          {acc.telegramId || 'Auto Verified'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">স্টোরেজ কী ID:</span>
+                        <span className="font-mono text-slate-300 text-[11px]">
+                          {acc.id}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 text-[11px]">লাইভ স্ট্যাটাস:</span>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                            isLiveActive
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-current"></span>
+                          {isLiveActive ? 'Live In-Room' : 'MTProto Ready'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Account Controls */}
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-800/60">
+                      {onToggleSelect && (
+                        <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={acc.selected !== false}
+                            onChange={() => onToggleSelect(acc.id)}
+                            className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-0 cursor-pointer"
+                          />
+                          <span>লাইভের জন্য নির্বাচিত</span>
+                        </label>
+                      )}
+
+                      {onDeleteAccount && (
+                        <button
+                          id={`btn-admin-delete-acc-${acc.id}`}
+                          onClick={() => onDeleteAccount(acc.id)}
+                          title="অ্যাকাউন্ট মুছে ফেলুন"
+                          className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors ml-auto"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

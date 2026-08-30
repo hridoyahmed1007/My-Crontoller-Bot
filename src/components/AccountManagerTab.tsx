@@ -313,15 +313,27 @@ export const AccountManagerTab: React.FC<AccountManagerTabProps> = ({
                   className="w-10 h-10 rounded-full object-cover border border-slate-700 flex-shrink-0"
                 />
                 <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <h4 className="font-semibold text-slate-200 text-sm truncate">{acc.name}</h4>
-                    {acc.username && (
-                      <span className="text-[11px] text-blue-400 font-mono">
+                    {acc.username ? (
+                      <span className="text-[11px] text-sky-400 font-mono bg-sky-950/60 px-1.5 py-0.5 rounded border border-sky-800/60">
                         @{acc.username.replace('@', '')}
                       </span>
+                    ) : (
+                      <span className="text-[10px] text-slate-500 italic">ইউজারনেম নেই</span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400 font-mono">{acc.phone}</p>
+                  <div className="flex items-center gap-2 text-xs text-slate-400 font-mono flex-wrap pt-0.5">
+                    <span className="text-emerald-400 font-medium">{acc.phone}</span>
+                    {acc.telegramId && (
+                      <span className="bg-slate-900 px-1.5 py-0.5 rounded text-[11px] text-slate-300 border border-slate-800">
+                        ID: <span className="text-blue-400 font-semibold">{acc.telegramId}</span>
+                      </span>
+                    )}
+                    <span className="bg-slate-900 px-1.5 py-0.5 rounded text-[10px] text-slate-400 border border-slate-800 hidden md:inline">
+                      Key ID: {acc.id.slice(-6)}
+                    </span>
+                  </div>
                 </div>
               </div>
 

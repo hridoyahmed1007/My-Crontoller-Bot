@@ -34,9 +34,31 @@ export default function App() {
   const [currentAdmin, setCurrentAdmin] = useState<AdminController | null>(() => {
     try {
       const saved = localStorage.getItem('live_admin_auth');
-      return saved ? JSON.parse(saved) : null;
+      if (saved) return JSON.parse(saved);
+      // Default to Master Super Admin from screenshot so the owner is never repeatedly prompted
+      return {
+        id: 'admin-super-owner',
+        name: 'offline',
+        telegramId: '7983626971',
+        username: 'Thebossbd360',
+        email: 'anarulislamai1020@gmail.com',
+        role: 'super_admin',
+        addedAt: '২৯ আগস্ট, ২০২৬',
+        isActive: true,
+        notes: 'প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক'
+      };
     } catch {
-      return null;
+      return {
+        id: 'admin-super-owner',
+        name: 'offline',
+        telegramId: '7983626971',
+        username: 'Thebossbd360',
+        email: 'anarulislamai1020@gmail.com',
+        role: 'super_admin',
+        addedAt: '২৯ আগস্ট, ২০২৬',
+        isActive: true,
+        notes: 'প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক'
+      };
     }
   });
   
@@ -72,6 +94,7 @@ export default function App() {
               name: acc.name || "Telegram User",
               username: acc.username || "",
               phone: acc.phone || "",
+              telegramId: acc.telegramId || "",
               avatarUrl: acc.avatarUrl || (acc.username ? `https://t.me/i/userpic/320/${acc.username.replace('@','')}.jpg` : 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80'),
               sessionString: acc.sessionString || '1BVtsOK0Bu...encrypted_mtproto_string_session...',
               apiId: '33961947',
@@ -380,7 +403,12 @@ export default function App() {
 
         {activeTab === 'admins' && (
           <div className="h-[750px] w-full">
-            <AdminManagerTab />
+            <AdminManagerTab
+              accounts={accounts}
+              onDeleteAccount={handleDeleteAccount}
+              onToggleSelect={handleToggleSelect}
+              isLiveActive={isLiveActive}
+            />
           </div>
         )}
 

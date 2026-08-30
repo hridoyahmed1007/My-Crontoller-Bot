@@ -16,6 +16,7 @@ export interface TelegramAccount {
   name: string;
   username: string;
   phone: string;
+  telegramId?: number | string;
   avatarUrl: string;
   sessionString: string;
   apiId: string;

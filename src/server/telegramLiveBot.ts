@@ -100,25 +100,50 @@ export function isAuthorizedController(
   userId?: number | string | null,
   username?: string | null
 ): { authorized: boolean; admin?: AdminController } {
-  // Transferrable Bot Access Rule:
-  // Whoever holds / interacts with the private bot has direct 100% Super Admin access.
-  // No manual ID/username pre-configuration required!
-  const uidStr = userId ? String(userId).trim() : "SuperAdmin";
-  const cleanUsername = username ? username.trim().replace(/^@/, "") : "Admin";
+  const uidStr = userId ? String(userId).trim() : "";
+  const cleanUsername = username ? username.trim().replace(/^@+/, "").toLowerCase() : "";
 
-  return {
-    authorized: true,
-    admin: {
-      id: `admin-${uidStr}`,
-      name: cleanUsername || `Admin (${uidStr})`,
-      telegramId: uidStr,
-      username: cleanUsername,
+  // 1. Permanent Super Admin Owner (Red marked in UI)
+  const isMasterId = uidStr === "7983626971";
+  const isMasterUsername = cleanUsername === "thebossbd360";
+
+  if (isMasterId || isMasterUsername) {
+    const masterAdmin: AdminController = {
+      id: "admin-super-owner",
+      name: "offline",
+      telegramId: "7983626971",
+      username: "Thebossbd360",
+      email: "anarulislamai1020@gmail.com",
       role: "super_admin",
-      addedAt: "সম্পূর্ণ ট্রান্সফারেবল সুপার অ্যাডমিন",
+      addedAt: "২৯ আগস্ট, ২০২৬",
       isActive: true,
-      notes: "বটের প্রত্যক্ষ ধারক ও সুপার অ্যাডমিন"
-    }
-  };
+      notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
+    };
+    return { authorized: true, admin: masterAdmin };
+  }
+
+  // 2. Check dynamic authorized admins from botGlobalState or disk
+  const adminList = (botGlobalState.admins && botGlobalState.admins.length > 0)
+    ? botGlobalState.admins
+    : loadPersistedAdmins();
+
+  const matched = adminList.find((a) => {
+    if (!a.isActive) return false;
+    const aTgId = a.telegramId ? String(a.telegramId).trim() : "";
+    const aUsername = a.username ? a.username.trim().replace(/^@+/, "").toLowerCase() : "";
+
+    const idMatches = Boolean(uidStr && aTgId && uidStr === aTgId);
+    const unameMatches = Boolean(cleanUsername && aUsername && cleanUsername === aUsername);
+
+    return idMatches || unameMatches;
+  });
+
+  if (matched) {
+    return { authorized: true, admin: matched };
+  }
+
+  // Strictly Unauthorized
+  return { authorized: false };
 }
 
 // Pending Real MTProto Authentication Sessions Store (keyed by userId string or number)
@@ -1093,18 +1118,31 @@ export async function executeRealMTProtoPing(): Promise<{
 
 let activeGrammyBot: Bot | null = null;
 let isPollingActive = false;
+let pollingRetryTimer: NodeJS.Timeout | null = null;
+
+export async function stopActiveTelegramBot() {
+  if (pollingRetryTimer) {
+    clearTimeout(pollingRetryTimer);
+    pollingRetryTimer = null;
+  }
+  if (activeGrammyBot) {
+    try {
+      if (isPollingActive) {
+        await activeGrammyBot.stop();
+      }
+    } catch (e) {
+      // ignore
+    }
+    isPollingActive = false;
+    activeGrammyBot = null;
+  }
+}
 
 export async function initAndStartTelegramBot(token: string, adminId: string) {
   try {
-    if (activeGrammyBot && isPollingActive) {
-      try {
-        await activeGrammyBot.stop();
-      } catch (e) {
-        // ignore
-      }
-      isPollingActive = false;
-      activeGrammyBot = null;
-    }
+    await stopActiveTelegramBot();
+    // Brief delay to allow any pending socket connections to close cleanly
+    await new Promise((r) => setTimeout(r, 600));
 
     botGlobalState.botToken = token ? token.trim() : "";
     botGlobalState.adminId = adminId ? adminId.trim() : "";
@@ -1127,6 +1165,10 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     // Attach global safe error handler
     bot.catch((err: any) => {
       const errorMsg = err?.error?.message || err?.message || String(err);
+      if (errorMsg.includes("409") || errorMsg.includes("Conflict") || errorMsg.includes("getUpdates")) {
+        console.warn("[Bot Notice] 409 Conflict handled - other instance terminating.");
+        return;
+      }
       console.warn("Telegram bot notice:", errorMsg);
       addBotLog("warning", `টেলিগ্রাম বার্তা: ${errorMsg}`);
     });
@@ -2086,16 +2128,16 @@ ${participantSummary}
       const userKey = String(userId);
       const pending = pendingAuthSessions.get(userKey);
       const state = userWizardStates.get(userId);
-      const phone = pending?.phone || state?.pendingPhone || "+8801761623922";
+      const phone = pending?.phone || state?.pendingPhone || "";
 
       const validatingMsg = await ctx.reply(
         `⏳ *কোডটি (${code}) টেলিগ্রাম সার্ভারে যাচাই করা হচ্ছে ও আপনার আসল প্রোফাইল তথ্য লোড করা হচ্ছে...*`,
         { parse_mode: "Markdown" }
       );
 
-      let realDisplayName = `Telegram User (${phone.slice(-4)})`;
+      let realDisplayName = `Telegram User (${phone ? phone.slice(-4) : "Live"})`;
       let realDisplayUsername = "";
-      let realTgId: number | string = 7297762323;
+      let realTgId: number | string = userId || (phone ? Number(phone.replace(/\D/g, "").slice(-9)) : 7983626971);
       let realAvatarUrl: string | undefined = undefined;
       let savedSession = "";
 
@@ -2245,14 +2287,14 @@ ${participantSummary}
       const userKey = String(userId);
       const pending = pendingAuthSessions.get(userKey);
       const state = userWizardStates.get(userId);
-      const phone = pending?.phone || state?.pendingPhone || "+8801761623922";
+      const phone = pending?.phone || state?.pendingPhone || "";
       const password = rawPassword.trim();
 
       const checkMsg = await ctx.reply(`⏳ <b>টু-স্টেপ পাসওয়ার্ড ভেরিফাই করা হচ্ছে ও আসল প্রোফাইল লোড হচ্ছে...</b>`, { parse_mode: "HTML" });
 
-      let realDisplayName = `Telegram User (${phone.slice(-4)})`;
+      let realDisplayName = `Telegram User (${phone ? phone.slice(-4) : "Live"})`;
       let realDisplayUsername = "";
-      let realTgId: number | string = 7297762323;
+      let realTgId: number | string = userId || (phone ? Number(phone.replace(/\D/g, "").slice(-9)) : 7983626971);
       let realAvatarUrl: string | undefined = undefined;
       let savedSession = "";
 
@@ -2406,16 +2448,44 @@ ${participantSummary}
       );
     }
 
-    // 5. Start Long Polling Safely
+    // 5. Start Long Polling Safely (Clear any dangling webhooks first to avoid 409 Conflict)
+    try {
+      await bot.api.deleteWebhook({ drop_pending_updates: true });
+    } catch (e) {
+      // ignore webhook deletion error if any
+    }
+
     isPollingActive = true;
-    bot.start({
-      onStart: (info) => {
-        addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং শুরু হয়েছে! @${info.username}`);
-      }
-    }).catch((err) => {
-      console.warn("Polling notice:", err?.message || err);
-      isPollingActive = false;
-    });
+    const startPollingWithRetry = (retryCount = 0) => {
+      if (!activeGrammyBot || activeGrammyBot !== bot) return;
+
+      bot.start({
+        drop_pending_updates: true,
+        onStart: (info) => {
+          isPollingActive = true;
+          addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং শুরু হয়েছে! @${info.username}`);
+        }
+      }).catch(async (err: any) => {
+        const errMsg = err?.message || String(err);
+        isPollingActive = false;
+
+        if (errMsg.includes("409") || errMsg.includes("Conflict") || errMsg.includes("getUpdates")) {
+          console.warn("[Polling Conflict] 409 Conflict: Previous instance disconnecting. Retrying in 3s...");
+          if (retryCount < 5 && activeGrammyBot === bot) {
+            pollingRetryTimer = setTimeout(async () => {
+              try {
+                await bot.api.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
+              } catch (e) {}
+              startPollingWithRetry(retryCount + 1);
+            }, 3000);
+          }
+        } else {
+          console.warn("Polling notice:", errMsg);
+        }
+      });
+    };
+
+    startPollingWithRetry(0);
 
     // 6. Auto-recover active live stream if previous session was in progress before restart
     if (botGlobalState.activeLive && botGlobalState.accounts.length > 0) {
