@@ -12,6 +12,7 @@ import {
   loadPersistedAdmins,
   savePersistedAdmins,
   upsertAdminPermanently,
+  syncAdminsPermanently,
   deleteAdminPermanently,
   toggleAdminStatusPermanently,
   AdminController,
@@ -73,6 +74,13 @@ export function addAuthorizedAdmin(admin: AdminController): AdminController[] {
   const updated = upsertAdminPermanently(admin, botGlobalState.admins);
   botGlobalState.admins = updated;
   addBotLog("success", `[Admin Management] নতুন কন্ট্রোলার যুক্ত করা হয়েছে: ${admin.name} (ID: ${admin.telegramId}, @${admin.username || "N/A"})`);
+  return updated;
+}
+
+export function syncAuthorizedAdmins(incomingAdmins: AdminController[]): AdminController[] {
+  const updated = syncAdminsPermanently(incomingAdmins, botGlobalState.admins);
+  botGlobalState.admins = updated;
+  addBotLog("info", `[Admin Management] স্থায়ী কন্ট্রোলার তালিকা সিঙ্ক করা হয়েছে (${updated.length} জন)`);
   return updated;
 }
 
@@ -1259,69 +1267,16 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     });
 
     async function showAccountList(ctx: any) {
-      if (botGlobalState.accounts.length === 0) {
-        botGlobalState.accounts = loadPersistedAccounts();
+      const comingSoonText = `⏳ <b>কামিং সুন (Coming Soon)!</b>\n\n🔒 <i>সুরক্ষা ও গোপনীয়তার স্বার্থে বটে অ্যাকাউন্ট নম্বরের তালিকা প্রদর্শন আপাতত বন্ধ রাখা হয়েছে। এই ফিচারটি পরে আসবে।</i>\n\n📱 <b>অ্যাকাউন্ট পর্যবেক্ষণ:</b>\nআপনার সমস্ত যুক্তকৃত অ্যাকাউন্ট ও তাদের পূর্ণাঙ্গ তথ্য (নাম, মোবাইল নম্বর, টেলিগ্রাম আইডি, লাইভ স্ট্যাটাস) সরাসরি ওয়েব <b>অ্যাডমিন প্যানেল</b> থেকে নিরাপদে দেখতে পারবেন।\n\n━━━━━━━━━━━━━━━━━━━━\n👇 <i>অন্যান্য কমান্ড বা লাইভ শুরু করতে নিচের মেনু বোতাম ব্যবহার করুন:</i>`;
+
+      try {
+        await ctx.reply(comingSoonText, {
+          parse_mode: "HTML",
+          reply_markup: getMainMenuKeyboard()
+        });
+      } catch (err) {
+        console.error("[Bot] Error sending coming soon response:", err);
       }
-
-      if (botGlobalState.accounts.length === 0) {
-        await ctx.reply(
-          `👥 <b>বর্তমানে কোনো ভেরিফাইড টেলিগ্রাম অ্যাকাউন্ট সংরক্ষিত নেই!</b>\n\n👉 আপনার নম্বর দিয়ে আসল অ্যাকাউন্ট কানেক্ট করতে নিচের '➕ নতুন অ্যাকাউন্ট যোগ' বোতাম চাপুন।\n\n💾 <i>নোট: আপনি যে অ্যাকাউন্টটি যোগ করবেন তা সারাজীবন পার্মানেন্টলি সেভ থাকবে, কখনই হারিয়ে যাবে না।</i>`,
-          {
-            parse_mode: "HTML",
-            reply_markup: getMainMenuKeyboard()
-          }
-        );
-        return;
-      }
-
-      let accListText = `👥 <b>স্থায়ীভাবে সংরক্ষিত টেলিগ্রাম অ্যাকাউন্ট (${botGlobalState.accounts.length} টি):</b>\n`;
-      accListText += `💾 <b>স্টোরেজ স্ট্যাটাস:</b> 🟢 <b>জীবনভর পার্মানেন্ট সেভ্ড (Permanent on Disk - কখনই মুছবে না)</b>\n\n`;
-
-      for (let i = 0; i < botGlobalState.accounts.length; i++) {
-        const acc = botGlobalState.accounts[i];
-        const isLive = acc.status === "in_live";
-        const statusEmoji = isLive ? `🔴 লাইভে যুক্ত (${escapeHtml(acc.connectedLive || "সক্রিয়")})` : `🟢 প্রস্তুত (Idle)`;
-        const rawUsername = acc.username ? acc.username.trim().replace(/^@+/, "") : "";
-        const unameDisplay = rawUsername ? `@${escapeHtml(rawUsername)}` : `<i>কোনো ইউজারনেম নেই</i>`;
-        const profileLink = rawUsername
-          ? `https://t.me/${rawUsername}`
-          : (acc.telegramId ? `tg://user?id=${acc.telegramId}` : "");
-
-        accListText += `<b>${i + 1}.</b> 👤 <b>আসল নাম:</b> <b>${escapeHtml(acc.name)}</b>\n`;
-        accListText += `   📱 <b>নম্বর:</b> <code>${escapeHtml(acc.phone)}</code>\n`;
-        accListText += `   🔗 <b>ইউজারনেম:</b> <code>${unameDisplay}</code>\n`;
-        if (acc.telegramId) {
-          accListText += `   🆔 <b>ইউজার আইডি:</b> <code>${escapeHtml(acc.telegramId)}</code>\n`;
-        }
-        if (profileLink) {
-          accListText += `   🖼️ <b>প্রোফাইল লিংক:</b> <a href="${profileLink}">View Telegram Profile</a>\n`;
-        }
-        accListText += `   🔐 <b>MTProto সেশন:</b> 🟢 100% সুরক্ষিত ও সংরক্ষিত\n`;
-        accListText += `   ⚡ <b>স্ট্যাটাস:</b> ${statusEmoji}\n\n`;
-      }
-
-      accListText += `━━━━━━━━━━━━━━━━━━━\n`;
-      accListText += `💡 <b>টিপস:</b> লাইভে সব আইডি এক ক্লিকে যুক্ত করতে '🔴 লাইভে আইডি যুক্ত করুন' চাপুন।`;
-
-      // Try sending with photo if available for single primary account
-      const firstAcc = botGlobalState.accounts[0];
-      if (firstAcc?.avatarUrl) {
-        try {
-          await ctx.replyWithPhoto(firstAcc.avatarUrl, {
-            caption: accListText,
-            parse_mode: "HTML",
-            reply_markup: getMainMenuKeyboard()
-          });
-          return;
-        } catch (e) {
-          // fallback to text reply
-        }
-      }
-
-      await ctx.reply(accListText, {
-        parse_mode: "HTML",
-        reply_markup: getMainMenuKeyboard()
-      });
     }
 
     async function showLiveStatus(ctx: any) {
@@ -1620,7 +1575,7 @@ ${liveStatusBadge}
     });
 
     bot.callbackQuery("btn_list_accounts", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery({ text: "⏳ কামিং সুন (Coming Soon)! এই ফিচারটি পরে আসবে।" });
       await showAccountList(ctx);
     });
 

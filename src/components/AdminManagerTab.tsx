@@ -31,14 +31,30 @@ interface AdminManagerTabProps {
   isLiveActive?: boolean;
 }
 
+const STORAGE_KEY_ADMINS = 'tg_bot_persisted_admins_permanent_v1';
+
 export function AdminManagerTab({
   accounts = [],
   onDeleteAccount,
   onToggleSelect,
   isLiveActive = false
 }: AdminManagerTabProps) {
-  const [admins, setAdmins] = useState<AdminController[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Initialize immediately from localStorage for zero delay
+  const [admins, setAdmins] = useState<AdminController[]>(() => {
+    try {
+      const cached = localStorage.getItem(STORAGE_KEY_ADMINS);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  });
+  const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -57,27 +73,75 @@ export function AdminManagerTab({
   const [testInput, setTestInput] = useState('');
   const [testResult, setTestResult] = useState<{ checked: boolean; authorized: boolean; match?: AdminController } | null>(null);
 
-  // Fetch admin controllers list from server
-  const fetchAdmins = async () => {
+  // Helper to persist to localStorage safely
+  const persistLocally = (list: AdminController[]) => {
     try {
-      setLoading(true);
+      localStorage.setItem(STORAGE_KEY_ADMINS, JSON.stringify(list));
+    } catch (e) {
+      console.warn('Failed to save admins to localStorage:', e);
+    }
+  };
+
+  // Fetch admin controllers list from server with bidirectional recovery
+  const fetchAdmins = async (isInitial = false) => {
+    try {
+      if (isInitial && admins.length === 0) {
+        setLoading(true);
+      }
       const res = await fetch('/api/admins');
       if (res.ok) {
         const data = await res.json();
         if (data.admins && Array.isArray(data.admins)) {
-          setAdmins(data.admins);
+          const serverAdmins: AdminController[] = data.admins;
+          
+          // Check if local cache has any extra admins that server restarted without
+          let localAdmins: AdminController[] = [];
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY_ADMINS);
+            if (raw) localAdmins = JSON.parse(raw) || [];
+          } catch (e) {}
+
+          const missingOnServer = localAdmins.filter(
+            (local) =>
+              !serverAdmins.some(
+                (srv) =>
+                  srv.id === local.id ||
+                  (local.telegramId && srv.telegramId === local.telegramId) ||
+                  (local.username && srv.username?.toLowerCase() === local.username.toLowerCase())
+              )
+          );
+
+          if (missingOnServer.length > 0) {
+            // Restore missing admins to server permanently
+            const syncRes = await fetch('/api/admins/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ admins: localAdmins })
+            });
+            if (syncRes.ok) {
+              const syncData = await syncRes.json();
+              if (syncData.admins) {
+                setAdmins(syncData.admins);
+                persistLocally(syncData.admins);
+                return;
+              }
+            }
+          }
+
+          setAdmins(serverAdmins);
+          persistLocally(serverAdmins);
         }
       }
     } catch (err) {
       console.error('Failed to fetch admins:', err);
     } finally {
-      setLoading(false);
+      if (isInitial) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAdmins();
-    const interval = setInterval(fetchAdmins, 4000);
+    fetchAdmins(true);
+    const interval = setInterval(() => fetchAdmins(false), 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -116,6 +180,7 @@ export function AdminManagerTab({
       const data = await res.json();
       if (data.success) {
         setAdmins(data.admins);
+        persistLocally(data.admins);
         setNewName('');
         setNewTelegramId('');
         setNewUsername('');
@@ -124,7 +189,7 @@ export function AdminManagerTab({
         setNewNotes('');
         setStatusMessage({
           type: 'success',
-          text: `✅ "${data.admin?.name || 'কন্ট্রোলার'}" সফলভাবে যুক্ত হয়েছে! এখন এই ইউজার টেলিগ্রাম বটে পূর্ণ এক্সেস পাবেন।`
+          text: `✅ "${data.admin?.name || 'কন্ট্রোলার'}" সফলভাবে যুক্ত হয়েছে! এটি স্থায়ীভাবে (Permanent) সেভ থাকবে যতক্ষণ না আপনি ডিলিট করেন।`
         });
       } else {
         setStatusMessage({ type: 'error', text: data.error || 'যুক্ত করতে ব্যর্থ হয়েছে।' });
@@ -147,9 +212,10 @@ export function AdminManagerTab({
       const data = await res.json();
       if (data.success) {
         setAdmins(data.admins);
+        persistLocally(data.admins);
         setStatusMessage({
           type: 'success',
-          text: `🗑️ "${name}"-এর এক্সেস সফলভাবে বাতিল করা হয়েছে। এখন সে আর বট চালাতে পারবে না।`
+          text: `🗑️ "${name}"-এর এক্সেস সফলভাবে বাতিল করা হয়েছে।`
         });
       }
     } catch (err: any) {
@@ -164,6 +230,7 @@ export function AdminManagerTab({
       const data = await res.json();
       if (data.success) {
         setAdmins(data.admins);
+        persistLocally(data.admins);
       }
     } catch (err) {
       console.error(err);

@@ -20,6 +20,7 @@ import {
   AccountSession,
   getAuthorizedAdmins,
   addAuthorizedAdmin,
+  syncAuthorizedAdmins,
   removeAuthorizedAdmin,
   toggleAuthorizedAdminStatus
 } from "./src/server/telegramLiveBot";
@@ -252,6 +253,19 @@ async function startServer() {
 
       const updated = addAuthorizedAdmin(newAdmin);
       res.json({ success: true, admins: updated, admin: newAdmin });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err?.message || String(err) });
+    }
+  });
+
+  app.post("/api/admins/sync", (req, res) => {
+    try {
+      const { admins } = req.body;
+      if (Array.isArray(admins) && admins.length > 0) {
+        const synced = syncAuthorizedAdmins(admins);
+        return res.json({ success: true, admins: synced });
+      }
+      res.json({ success: true, admins: getAuthorizedAdmins() });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err?.message || String(err) });
     }
