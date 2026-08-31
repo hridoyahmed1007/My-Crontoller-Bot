@@ -97,7 +97,7 @@ export function AdminManagerTab({
         }
       }
     } catch (err) {
-      console.error('Failed to fetch admins:', err);
+      // Gracefully silent on background retry or brief network blips
     } finally {
       if (isInitial) setLoading(false);
     }
@@ -197,7 +197,7 @@ export function AdminManagerTab({
         persistLocally(data.admins);
       }
     } catch (err) {
-      console.error(err);
+      // ignore
     }
   };
 
