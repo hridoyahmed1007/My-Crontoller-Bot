@@ -12,6 +12,7 @@ export interface AdminController {
   addedAt: string;
   isActive: boolean;
   notes?: string;
+  permissions?: string[];
 }
 
 export type AccountConnectionState =
@@ -106,24 +107,23 @@ const MASTER_SUPER_ADMIN_RECORD: AdminController = {
   id: "admin-super-owner",
   name: "offline",
   telegramId: "7983626971",
-  username: "Thebossbd360",
+  username: "thebossbd360",
   email: "anarulislamai1020@gmail.com",
   role: "super_admin",
   addedAt: "২৯ আগস্ট, ২০২৬",
   isActive: true,
-  notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
+  notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক",
+  permissions: ["full_access", "live_control", "manage_accounts", "reaction_control", "manage_admins"]
 };
 
-// Helper to filter out unwanted test records
+// Helper to sanitize admin records without filtering out valid controllers
 function sanitizeAdminRecords(list: any[]): AdminController[] {
   if (!Array.isArray(list)) return [];
   const valid = list.filter(
     (a) =>
       a &&
       typeof a === "object" &&
-      a.telegramId !== "7297762323" &&
-      a.telegramId !== 7297762323 &&
-      !(a.username && a.username.toLowerCase().includes("habib20863"))
+      (Boolean(a.telegramId) || Boolean(a.username) || Boolean(a.id))
   );
   return valid;
 }
@@ -369,13 +369,7 @@ export function loadPersistedAccounts(): AccountSession[] {
       const raw = fs.readFileSync(ACCOUNTS_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        // Clean out any stale Habib Hasan records if present
-        const cleaned = parsed.filter(
-          (a) =>
-            a.telegramId !== "7297762323" &&
-            a.telegramId !== 7297762323 &&
-            !(a.username && a.username.toLowerCase().includes("habib20863"))
-        );
+        const cleaned = parsed.filter(a => a && typeof a === "object");
 
         if (cleaned.length > 0) {
           console.log(`[Storage] Loaded ${cleaned.length} permanent Telegram accounts from disk.`);
@@ -393,12 +387,7 @@ export function loadPersistedAccounts(): AccountSession[] {
       const rawBak = fs.readFileSync(ACCOUNTS_BACKUP_FILE, "utf-8");
       const parsedBak = JSON.parse(rawBak);
       if (Array.isArray(parsedBak) && parsedBak.length > 0) {
-        const cleanedBak = parsedBak.filter(
-          (a) =>
-            a.telegramId !== "7297762323" &&
-            a.telegramId !== 7297762323 &&
-            !(a.username && a.username.toLowerCase().includes("habib20863"))
-        );
+        const cleanedBak = parsedBak.filter(a => a && typeof a === "object");
         if (cleanedBak.length > 0) {
           console.log(`[Storage] Loaded ${cleanedBak.length} permanent Telegram accounts from backup file.`);
           savePersistedAccounts(cleanedBak);

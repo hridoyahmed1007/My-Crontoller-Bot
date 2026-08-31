@@ -230,13 +230,19 @@ async function startServer() {
 
   app.post("/api/admins", (req, res) => {
     try {
-      const { name, telegramId, username, role, notes, email, password } = req.body;
+      const { name, telegramId, username, role, notes, email, password, permissions } = req.body;
       if (!telegramId && !username) {
         return res.status(400).json({ success: false, error: "টেলিগ্রাম আইডি অথবা ইউজারনেম আবশ্যক।" });
       }
 
       const cleanTgId = telegramId ? normalizeBengaliDigits(String(telegramId)).replace(/\D/g, "") : "";
       const cleanUsername = username ? username.trim().replace(/^@+/, "") : "";
+
+      const defaultPermissions = role === "super_admin"
+        ? ["full_access", "live_control", "manage_accounts", "reaction_control", "manage_admins"]
+        : (Array.isArray(permissions) && permissions.length > 0
+            ? permissions
+            : ["live_control", "manage_accounts", "reaction_control"]);
 
       const newAdmin: AdminController = {
         id: req.body.id || `admin_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
@@ -248,7 +254,8 @@ async function startServer() {
         role: role === "super_admin" ? "super_admin" : "controller",
         addedAt: new Date().toLocaleDateString("bn-BD", { day: "numeric", month: "long", year: "numeric" }),
         isActive: true,
-        notes: notes?.trim() || ""
+        notes: notes?.trim() || "",
+        permissions: defaultPermissions
       };
 
       const updated = addAuthorizedAdmin(newAdmin);

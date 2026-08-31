@@ -9,6 +9,7 @@ export interface AdminController {
   addedAt: string;
   isActive: boolean;
   notes?: string;
+  permissions?: string[];
 }
 
 export interface TelegramAccount {

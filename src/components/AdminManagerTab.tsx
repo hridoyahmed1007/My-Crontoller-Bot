@@ -14,13 +14,21 @@ import {
   ExternalLink,
   Lock,
   Eye,
+  EyeOff,
   RefreshCw,
   Info,
   BadgeAlert,
   Smartphone,
   Radio,
   SlidersHorizontal,
-  Server
+  Crown,
+  Key,
+  CheckSquare,
+  Square,
+  Shield,
+  Zap,
+  Mic,
+  Activity
 } from 'lucide-react';
 import { AdminController, TelegramAccount } from '../types';
 
@@ -68,6 +76,13 @@ export function AdminManagerTab({
   const [newPassword, setNewPassword] = useState('');
   const [newRole, setNewRole] = useState<'super_admin' | 'controller'>('controller');
   const [newNotes, setNewNotes] = useState('');
+  const [selectedPermissions, setSelectedPermissions] = useState<string[]>([
+    'live_control',
+    'manage_accounts',
+    'reactions_comments',
+    'speaker_stage'
+  ]);
+  const [showPasswordMap, setShowPasswordMap] = useState<Record<string, boolean>>({});
 
   // Access test checker
   const [testInput, setTestInput] = useState('');
@@ -115,6 +130,33 @@ export function AdminManagerTab({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const handleTogglePermission = (perm: string) => {
+    setSelectedPermissions(prev =>
+      prev.includes(perm) ? prev.filter(p => p !== perm) : [...prev, perm]
+    );
+  };
+
+  const handleRoleChange = (role: 'super_admin' | 'controller') => {
+    setNewRole(role);
+    if (role === 'super_admin') {
+      setSelectedPermissions([
+        'full_access',
+        'live_control',
+        'manage_accounts',
+        'reactions_comments',
+        'speaker_stage',
+        'manage_admins'
+      ]);
+    } else {
+      setSelectedPermissions([
+        'live_control',
+        'manage_accounts',
+        'reactions_comments',
+        'speaker_stage'
+      ]);
+    }
+  };
+
   // Add new controller
   const handleAddAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -138,6 +180,7 @@ export function AdminManagerTab({
           password: newPassword,
           role: newRole,
           notes: newNotes,
+          permissions: selectedPermissions
         })
       });
 
@@ -151,9 +194,10 @@ export function AdminManagerTab({
         setNewEmail('');
         setNewPassword('');
         setNewNotes('');
+        setSelectedPermissions(['live_control', 'manage_accounts', 'reactions_comments', 'speaker_stage']);
         setStatusMessage({
           type: 'success',
-          text: `✅ "${data.admin?.name || 'কন্ট্রোলার'}" সফলভাবে যুক্ত হয়েছে! এটি স্থায়ীভাবে (Permanent) সেভ থাকবে যতক্ষণ না আপনি ডিলিট করেন।`
+          text: `✅ "${data.admin?.name || 'কন্ট্রোলার'}"-কে লাইফটাইম এক্সেস প্রদান করা হয়েছে! পেজ রিফ্রেশ করলেও সকল ডিটেইলস স্থায়ী থাকবে।`
         });
       } else {
         setStatusMessage({ type: 'error', text: data.error || 'যুক্ত করতে ব্যর্থ হয়েছে।' });
@@ -443,7 +487,7 @@ export function AdminManagerTab({
                 <button
                   type="button"
                   id="btn-role-controller"
-                  onClick={() => setNewRole('controller')}
+                  onClick={() => handleRoleChange('controller')}
                   className={`p-2.5 rounded-xl border text-left flex flex-col transition-all ${
                     newRole === 'controller'
                       ? 'bg-blue-600/20 border-blue-500/50 text-blue-300 ring-1 ring-blue-500'
@@ -453,13 +497,13 @@ export function AdminManagerTab({
                   <span className="text-xs font-bold flex items-center gap-1">
                     🛡️ অপারেটর কন্ট্রোলার
                   </span>
-                  <span className="text-[10px] text-slate-400 mt-0.5">লাইভে আইডি যুক্ত ও রিমুভ</span>
+                  <span className="text-[10px] text-slate-400 mt-0.5">লাইভ রুম ও স্পিকার পরিচালনা</span>
                 </button>
 
                 <button
                   type="button"
                   id="btn-role-superadmin"
-                  onClick={() => setNewRole('super_admin')}
+                  onClick={() => handleRoleChange('super_admin')}
                   className={`p-2.5 rounded-xl border text-left flex flex-col transition-all ${
                     newRole === 'super_admin'
                       ? 'bg-amber-500/20 border-amber-500/50 text-amber-300 ring-1 ring-amber-500'
@@ -471,6 +515,83 @@ export function AdminManagerTab({
                   </span>
                   <span className="text-[10px] text-slate-400 mt-0.5">পূর্ণ কর্তৃত্ব ও ক্ষমতা</span>
                 </button>
+              </div>
+
+              {/* Granular Permissions Selection */}
+              <div className="p-3 bg-slate-950/70 border border-slate-800/80 rounded-xl space-y-2">
+                <label className="block text-xs font-semibold text-slate-300 flex items-center justify-between">
+                  <span>অনুমোদিত এক্সেস ও ক্ষমতা (Permissions)</span>
+                  <span className="text-[10px] text-emerald-400 font-normal">লাইফটাইম সক্রিয়</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePermission('live_control')}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-all ${
+                      selectedPermissions.includes('live_control')
+                        ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {selectedPermissions.includes('live_control') ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    )}
+                    <span>🎯 লাইভ স্ট্রিম নিয়ন্ত্রণ</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePermission('manage_accounts')}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-all ${
+                      selectedPermissions.includes('manage_accounts')
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {selectedPermissions.includes('manage_accounts') ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    )}
+                    <span>👥 অ্যাকাউন্ট যুক্ত/রিমুভ</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePermission('speaker_stage')}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-all ${
+                      selectedPermissions.includes('speaker_stage')
+                        ? 'bg-purple-500/15 border-purple-500/40 text-purple-300'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {selectedPermissions.includes('speaker_stage') ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    )}
+                    <span>🎙️ স্পিকার ও স্টেজ এক্সেস</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleTogglePermission('reactions_comments')}
+                    className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-left transition-all ${
+                      selectedPermissions.includes('reactions_comments')
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    {selectedPermissions.includes('reactions_comments') ? (
+                      <CheckSquare className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    ) : (
+                      <Square className="w-3.5 h-3.5 text-slate-600 shrink-0" />
+                    )}
+                    <span>⚡ অটো রিঅ্যাকশন ও কমেন্ট</span>
+                  </button>
+                </div>
               </div>
 
               {/* Note / Remarks */}
@@ -682,14 +803,15 @@ export function AdminManagerTab({
                             </div>
 
                             {/* Details row */}
-                            <div className="flex items-center gap-3 text-xs text-slate-300 flex-wrap pt-0.5">
+                            <div className="flex items-center gap-2.5 text-xs text-slate-300 flex-wrap pt-0.5">
                               {admin.telegramId && (
                                 <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800">
                                   <span className="text-[10px] text-slate-400">ID:</span>
                                   <code className="font-mono text-sky-400 font-semibold">{admin.telegramId}</code>
                                   <button
+                                    type="button"
                                     onClick={() => handleCopy(admin.telegramId, `id-${admin.id}`)}
-                                    title="কপি করুন"
+                                    title="আইডি কপি করুন"
                                     className="text-slate-400 hover:text-slate-200 ml-0.5"
                                   >
                                     {copiedId === `id-${admin.id}` ? (
@@ -718,6 +840,43 @@ export function AdminManagerTab({
                                 <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800 text-emerald-400">
                                   <span className="text-[10px] text-slate-400">Gmail:</span>
                                   <span className="font-mono text-[11px]">{admin.email}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(admin.email!, `email-${admin.id}`)}
+                                    title="ইমেইল কপি করুন"
+                                    className="text-slate-400 hover:text-slate-200 ml-0.5"
+                                  >
+                                    {copiedId === `email-${admin.id}` ? (
+                                      <Check className="w-3 h-3 text-emerald-400" />
+                                    ) : (
+                                      <Copy className="w-3 h-3" />
+                                    )}
+                                  </button>
+                                </div>
+                              )}
+
+                              {admin.password && (
+                                <div className="flex items-center gap-1 bg-slate-900 px-2 py-0.5 rounded-md border border-slate-800 text-amber-300">
+                                  <span className="text-[10px] text-slate-400">পাসওয়ার্ড:</span>
+                                  <code className="font-mono text-xs">
+                                    {showPasswordMap[admin.id] ? admin.password : '••••••••'}
+                                  </code>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowPasswordMap(prev => ({ ...prev, [admin.id]: !prev[admin.id] }))}
+                                    className="text-slate-400 hover:text-slate-200 ml-1"
+                                    title={showPasswordMap[admin.id] ? "লুকান" : "দেখুন"}
+                                  >
+                                    {showPasswordMap[admin.id] ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopy(admin.password!, `pwd-${admin.id}`)}
+                                    className="text-slate-400 hover:text-slate-200 ml-0.5"
+                                    title="পাসওয়ার্ড কপি করুন"
+                                  >
+                                    {copiedId === `pwd-${admin.id}` ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                                  </button>
                                 </div>
                               )}
 
@@ -727,6 +886,34 @@ export function AdminManagerTab({
                                 </span>
                               )}
                             </div>
+
+                            {/* Granted Permissions List */}
+                            {admin.permissions && admin.permissions.length > 0 && (
+                              <div className="flex items-center gap-1.5 flex-wrap pt-1.5">
+                                <span className="text-[10px] text-slate-400 font-semibold">এক্সেস সুবিধা:</span>
+                                {admin.permissions.map((perm, pIdx) => {
+                                  let label = perm;
+                                  let icon = "⚡";
+                                  if (perm === 'full_access') { label = "ফুল সিস্টেম এক্সেস"; icon = "👑"; }
+                                  else if (perm === 'live_control') { label = "লাইভ স্ট্রিম নিয়ন্ত্রণ"; icon = "🎯"; }
+                                  else if (perm === 'manage_accounts') { label = "অ্যাকাউন্ট যুক্ত/রিমুভ"; icon = "👥"; }
+                                  else if (perm === 'speaker_stage') { label = "স্পিকার ও স্টেজ"; icon = "🎙️"; }
+                                  else if (perm === 'reactions_comments') { label = "অটো রিঅ্যাকশন ও কমেন্ট"; icon = "⚡"; }
+                                  else if (perm === 'reaction_control') { label = "রিঅ্যাকশন কন্ট্রোল"; icon = "⚡"; }
+                                  else if (perm === 'manage_admins') { label = "অ্যাডমিন ম্যানেজমেন্ট"; icon = "🛡️"; }
+
+                                  return (
+                                    <span
+                                      key={pIdx}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] bg-slate-900 text-slate-200 border border-slate-800"
+                                    >
+                                      <span>{icon}</span>
+                                      <span>{label}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
 
                             {admin.notes && (
                               <p className="text-[11px] text-slate-400 italic pt-0.5">

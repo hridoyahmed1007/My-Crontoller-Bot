@@ -124,47 +124,63 @@ export function isAuthorizedController(
       id: "admin-super-owner",
       name: "offline",
       telegramId: "7983626971",
-      username: "Thebossbd360",
+      username: "thebossbd360",
       email: "anarulislamai1020@gmail.com",
       role: "super_admin",
       addedAt: "২৯ আগস্ট, ২০২৬",
       isActive: true,
-      notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
+      notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক",
+      permissions: [
+        "full_access",
+        "live_control",
+        "manage_accounts",
+        "reaction_control",
+        "manage_admins",
+        "reactions_comments",
+        "speaker_stage"
+      ]
     };
     return { authorized: true, admin: masterAdmin };
   }
 
-  // 2. Check in memory list first
-  let adminList = botGlobalState.admins && botGlobalState.admins.length > 0
-    ? botGlobalState.admins
-    : loadPersistedAdmins();
+  // 2. Load latest real-time controllers list combining disk and memory
+  const diskList = loadPersistedAdmins();
+  const memList = botGlobalState.admins || [];
+  const map = new Map<string, AdminController>();
+  for (const a of [...diskList, ...memList]) {
+    if (a) {
+      const key = a.id || a.telegramId || a.username || Math.random().toString();
+      map.set(key, a);
+    }
+  }
+  const allAdmins = Array.from(map.values());
+  botGlobalState.admins = allAdmins;
 
-  let matched = adminList.find((a) => {
-    if (!a.isActive) return false;
+  const matched = allAdmins.find((a) => {
+    // If explicitly marked inactive
+    if (a.isActive === false) return false;
+
     const aTgId = cleanTelegramDigits(a.telegramId);
     const aUname = cleanTelegramUsername(a.username);
+    const aName = cleanTelegramUsername(a.name);
+    const aIdDigits = cleanTelegramDigits(a.id);
 
-    const idMatches = Boolean(uidStr && aTgId && uidStr === aTgId);
-    const unameMatches = Boolean(cleanUsername && aUname && cleanUsername === aUname);
+    // 1. Direct Telegram ID match (e.g. 7297762323)
+    if (uidStr && aTgId && uidStr === aTgId) return true;
 
-    return idMatches || unameMatches;
+    // 2. Direct Username match (e.g. habib20863)
+    if (cleanUsername && aUname && cleanUsername === aUname) return true;
+    if (cleanUsername && aName && cleanUsername === aName) return true;
+
+    // 3. Cross-field matches (if user stored ID in username field or username in telegramId field)
+    if (uidStr && aUname && uidStr === cleanTelegramDigits(a.username)) return true;
+    if (cleanUsername && aTgId && cleanUsername === cleanTelegramUsername(a.telegramId)) return true;
+
+    // 4. Match against record ID if digits match
+    if (uidStr && aIdDigits && uidStr === aIdDigits) return true;
+
+    return false;
   });
-
-  // If not found in current memory, load directly from disk to be 100% sure
-  if (!matched) {
-    const diskList = loadPersistedAdmins();
-    botGlobalState.admins = diskList;
-    matched = diskList.find((a) => {
-      if (!a.isActive) return false;
-      const aTgId = cleanTelegramDigits(a.telegramId);
-      const aUname = cleanTelegramUsername(a.username);
-
-      const idMatches = Boolean(uidStr && aTgId && uidStr === aTgId);
-      const unameMatches = Boolean(cleanUsername && aUname && cleanUsername === aUname);
-
-      return idMatches || unameMatches;
-    });
-  }
 
   if (matched) {
     return { authorized: true, admin: matched };
@@ -1149,6 +1165,10 @@ let isPollingActive = false;
 let pollingRetryTimer: NodeJS.Timeout | null = null;
 let pollingWatchdogTimer: NodeJS.Timeout | null = null;
 
+// Global in-memory cache to prevent duplicate message and callback handling
+const processedUpdateIds = new Set<number>();
+const processedMessageKeys = new Map<string, number>();
+
 export async function stopActiveTelegramBot() {
   if (pollingRetryTimer) {
     clearTimeout(pollingRetryTimer);
@@ -1199,7 +1219,7 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     bot.catch((err: any) => {
       const errorMsg = err?.error?.message || err?.message || String(err);
       if (errorMsg.includes("409") || errorMsg.includes("Conflict") || errorMsg.includes("getUpdates")) {
-        console.warn("[Bot Notice] 409 Conflict handled - other instance terminating.");
+        console.warn("[Bot Notice] 409 Conflict handled - previous instance disconnecting.");
         return;
       }
       console.warn("Telegram bot notice:", errorMsg);
@@ -1266,7 +1286,45 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     }
 
     // ==========================================
-    // GLOBAL ACCESS CONTROL MIDDLEWARE
+    // 1. DEDUPLICATION & RATE LIMIT MIDDLEWARE
+    // ==========================================
+    bot.use(async (ctx, next) => {
+      // 1. Check duplicate update_id
+      const updateId = ctx.update?.update_id;
+      if (updateId) {
+        if (processedUpdateIds.has(updateId)) {
+          return; // Duplicate update dropped silently
+        }
+        processedUpdateIds.add(updateId);
+        if (processedUpdateIds.size > 4000) {
+          const arr = Array.from(processedUpdateIds);
+          arr.slice(0, 2000).forEach((id) => processedUpdateIds.delete(id));
+        }
+      }
+
+      // 2. Check duplicate message (chatId + messageId)
+      if (ctx.chat?.id && ctx.message?.message_id) {
+        const msgKey = `${ctx.chat.id}_${ctx.message.message_id}`;
+        const now = Date.now();
+        const prev = processedMessageKeys.get(msgKey);
+        if (prev && (now - prev) < 15000) {
+          return; // Duplicate message execution dropped
+        }
+        processedMessageKeys.set(msgKey, now);
+        if (processedMessageKeys.size > 4000) {
+          for (const [k, time] of processedMessageKeys.entries()) {
+            if (now - time > 60000) {
+              processedMessageKeys.delete(k);
+            }
+          }
+        }
+      }
+
+      return next();
+    });
+
+    // ==========================================
+    // 2. GLOBAL ACCESS CONTROL MIDDLEWARE
     // ==========================================
     bot.use(async (ctx, next) => {
       const userId = ctx.from?.id;
@@ -1296,15 +1354,33 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     });
 
     async function showAccountList(ctx: any) {
-      const comingSoonText = `⏳ <b>কামিং সুন (Coming Soon)!</b>\n\n🔒 <i>সুরক্ষা ও গোপনীয়তার স্বার্থে বটে অ্যাকাউন্ট নম্বরের তালিকা প্রদর্শন আপাতত বন্ধ রাখা হয়েছে। এই ফিচারটি পরে আসবে।</i>\n\n📱 <b>অ্যাকাউন্ট পর্যবেক্ষণ:</b>\nআপনার সমস্ত যুক্তকৃত অ্যাকাউন্ট ও তাদের পূর্ণাঙ্গ তথ্য (নাম, মোবাইল নম্বর, টেলিগ্রাম আইডি, লাইভ স্ট্যাটাস) সরাসরি ওয়েব <b>অ্যাডমিন প্যানেল</b> থেকে নিরাপদে দেখতে পারবেন।\n\n━━━━━━━━━━━━━━━━━━━━\n👇 <i>অন্যান্য কমান্ড বা লাইভ শুরু করতে নিচের মেনু বোতাম ব্যবহার করুন:</i>`;
+      const closedNotice = `🔒 <b>অ্যাকাউন্ট তালিকা পর্যবেক্ষণ বন্ধ আছে</b>
+━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ <i>সুরক্ষা ও সিস্টেমের গোপনীয়তার স্বার্থে বটের ভেতর সরাসরি অ্যাকাউন্ট তালিকা প্রদর্শন আপাতত বন্ধ রাখা হয়েছে।</i>
+
+📱 <b>অ্যাডমিন প্যানেল পর্যবেক্ষণ:</b>
+যুক্তকৃত সমস্ত অ্যাকাউন্টের লাইভ স্ট্যাটাস, বিস্তারিত ও পূর্ণাঙ্গ নিয়ন্ত্রণ সরাসরি ওয়েব <b>অ্যাডমিন প্যানেল</b> থেকে নিরাপদে পরিচালনা করা যাবে।
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+👇 <i>লাইভ বা অন্যান্য অ্যাকশনের জন্য নিচের বোতামগুলো ব্যবহার করুন:</i>`;
+
+      const quickKeyboard = new InlineKeyboard()
+        .text("🔴 লাইভে আইডি যুক্ত করুন", "btn_join_live")
+        .text("⏹️ লাইভ ছেড়ে আসুন", "btn_leave_live")
+        .row()
+        .text("➕ নতুন অ্যাকাউন্ট যোগ", "btn_add_account")
+        .text("📊 লাইভ স্ট্যাটাস ও হেলথ", "btn_status")
+        .row()
+        .text("⚡ সংযোগ ও পিং টেস্ট", "btn_ping_test")
+        .text("🔄 রিসেট সেশন", "btn_reset");
 
       try {
-        await ctx.reply(comingSoonText, {
+        await ctx.reply(closedNotice, {
           parse_mode: "HTML",
-          reply_markup: getMainMenuKeyboard()
+          reply_markup: quickKeyboard
         });
       } catch (err) {
-        console.error("[Bot] Error sending coming soon response:", err);
+        console.error("[Bot] Error sending account list notice:", err);
       }
     }
 
@@ -1507,7 +1583,7 @@ ${activeText}
         userWizardStates.set(userId, { step: "IDLE", enteredDigits: "", updatedAt: Date.now() });
       }
 
-      addBotLog("info", `ইউজার @${ctx.from?.username || userId} /start কমান্ড পাঠিয়েছেন।`);
+      addBotLog("info", `কন্ট্রোলার @${ctx.from?.username || userId} /start কমান্ড পাঠিয়েছেন।`);
 
       const liveStatusBadge = botGlobalState.activeLive
         ? `🔴 <b>চলমান লাইভ:</b> <code>${escapeHtml(botGlobalState.activeLive.target)}</code> (👥 <b>${botGlobalState.accounts.length} টি আইডি লাইভে যুক্ত</b>)`
@@ -1517,25 +1593,32 @@ ${activeText}
 
       const welcomeMsg = `👑 <b>লাইভ কন্ট্রোলার — অ্যাডমিন ড্যাশবোর্ড</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━
-👋 স্বাগতম, <b>${adminName}</b> <i>(অনলি অ্যাডমিন অ্যাক্সেস)</i>
+👋 স্বাগতম, <b>${adminName}</b> <i>(ভেরিফায়েড কন্ট্রোলার অ্যাক্সেস)</i>
 
 📊 <b>সিস্টেম ও ক্লাস্টার স্ট্যাটাস:</b>
 ├ 📡 <b>ইঞ্জিন:</b> MTProto Real Android Client
 ├ 👥 <b>সংরক্ষিত অ্যাকাউন্ট:</b> <b>${botGlobalState.accounts.length} টি</b> (১০০% স্থায়ী ও সুরক্ষিত)
 ├ ⏱️ <b>অ্যান্টি-ব্যান ডিলে:</b> ২.৫ – ৫.০ সেকেন্ড মানবীয় ব্যবধান
-└ 🛡️ <b>অ্যাডমিন গার্ড:</b> 🟢 ভেরিফায়েড ও সক্রিয়
+└ 🛡️ <b>কন্ট্রোলার গার্ড:</b> 🟢 সক্রিয় ও অনুমতিপ্রাপ্ত
 
 ${liveStatusBadge}
 
-⚙️ <b>কুইক অ্যাকশন নির্দেশিকা:</b>
+⚙️ <b>কুইক কন্ট্রোল নির্দেশনা:</b>
 • <b>লাইভে প্রবেশ:</b> <code>🔴 লাইভে আইডি যুক্ত করুন</code> চেপে চ্যানেল ইউজারনেম দিন।
-• <b>আইডি পর্যবেক্ষণ:</b> <code>👥 যুক্ত অ্যাকাউন্ট তালিকা</code> তে সব আইডির আসল প্রোফাইল দেখুন।
+• <b>আইডি পর্যবেক্ষণ:</b> <code>👥 যুক্ত অ্যাকাউন্ট তালিকা</code> তে সব আইডির প্রোফাইল ও স্ট্যাটাস দেখুন।
 • <b>নতুন আইডি যোগ:</b> <code>➕ নতুন অ্যাকাউন্ট যোগ</code> চেপে সহজে আইডি যুক্ত করুন।
 • <b>লাইভ সমাপ্ত:</b> <code>⏹️ লাইভ ছেড়ে আসুন</code> চেপে সব আইডি একসাথে বের করুন।
 ━━━━━━━━━━━━━━━━━━━━━━━━
-👇 <b>নিয়ন্ত্রণ করতে নিচের মেনু থেকে কমান্ড নির্বাচন করুন:</b>`;
+👇 <b>নিচের বোতামগুলো চেপে সরাসরি এক-ক্লিকে নিয়ন্ত্রণ করুন:</b>`;
 
+      // 1. Send bottom persistent reply keyboard
       await ctx.reply(welcomeMsg, {
+        parse_mode: "HTML",
+        reply_markup: getMainMenuReplyKeyboard()
+      });
+
+      // 2. Also send inline interactive quick buttons
+      await ctx.reply(`⚡ <b>কুইক অ্যাকশন বাটন প্যানেল:</b>`, {
         parse_mode: "HTML",
         reply_markup: getMainMenuKeyboard()
       });
@@ -1604,7 +1687,7 @@ ${liveStatusBadge}
     });
 
     bot.callbackQuery("btn_list_accounts", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "⏳ কামিং সুন (Coming Soon)! এই ফিচারটি পরে আসবে।" });
+      await ctx.answerCallbackQuery({ text: "🔒 অ্যাকাউন্ট তালিকা প্রদর্শন বন্ধ আছে।" });
       await showAccountList(ctx);
     });
 
