@@ -110,16 +110,20 @@ export function toggleAuthorizedAdminStatus(id: string): AdminController[] {
 
 export function isAuthorizedController(
   userId?: number | string | null,
-  username?: string | null
+  username?: string | null,
+  firstName?: string | null
 ): { authorized: boolean; admin?: AdminController } {
   const uidStr = cleanTelegramDigits(userId);
   const cleanUsername = cleanTelegramUsername(username);
+  const cleanFirst = cleanTelegramUsername(firstName);
 
-  // 1. Permanent Super Admin Owner (Always 100% Authorized)
-  const isMasterId = uidStr === "7983626971";
-  const isMasterUsername = cleanUsername === "thebossbd360";
+  // 1. Permanent Super Admin Owner & Permanent Primary Controllers (100% Guaranteed Unconditional Access)
+  const isMaster =
+    uidStr === "7983626971" ||
+    cleanUsername === "thebossbd360" ||
+    cleanUsername === "offline";
 
-  if (isMasterId || isMasterUsername) {
+  if (isMaster) {
     const masterAdmin: AdminController = {
       id: "admin-super-owner",
       name: "offline",
@@ -143,7 +147,48 @@ export function isAuthorizedController(
     return { authorized: true, admin: masterAdmin };
   }
 
-  // 2. Load latest real-time controllers list combining disk and memory
+  const isHabibHasan =
+    uidStr === "7297762323" ||
+    cleanUsername === "habib20863" ||
+    cleanUsername === "hridoyarmy1007" ||
+    cleanUsername === "hridoy1007" ||
+    cleanFirst === "habib" ||
+    cleanFirst === "hridoy";
+
+  if (isHabibHasan) {
+    const habibAdmin: AdminController = {
+      id: "admin_1788192434241_o65g",
+      name: "Habib Hasan",
+      telegramId: "7297762323",
+      username: "habib20863",
+      email: "hridoyarmy1007@gmail.com",
+      role: "controller",
+      addedAt: "৩১ আগস্ট, ২০২৬",
+      isActive: true,
+      notes: "অনুমোদিত প্রধান কন্ট্রোলার অ্যাডমিন",
+      permissions: [
+        "manage_accounts",
+        "reactions_comments",
+        "speaker_stage",
+        "live_control"
+      ]
+    };
+    return { authorized: true, admin: habibAdmin };
+  }
+
+  // 2. Check if matches configured botGlobalState.adminId
+  if (botGlobalState.adminId) {
+    const cfgClean = cleanTelegramUsername(botGlobalState.adminId);
+    const cfgDigits = cleanTelegramDigits(botGlobalState.adminId);
+    if (
+      (cfgDigits && cfgDigits === uidStr) ||
+      (cfgClean && (cfgClean === cleanUsername || cfgClean === "superadmin"))
+    ) {
+      return { authorized: true };
+    }
+  }
+
+  // 3. Load latest real-time controllers list combining disk and memory
   const diskList = loadPersistedAdmins();
   const memList = botGlobalState.admins || [];
   const map = new Map<string, AdminController>();
@@ -164,6 +209,7 @@ export function isAuthorizedController(
     const aUname = cleanTelegramUsername(a.username);
     const aName = cleanTelegramUsername(a.name);
     const aIdDigits = cleanTelegramDigits(a.id);
+    const aEmail = cleanTelegramUsername(a.email);
 
     // 1. Direct Telegram ID match (e.g. 7297762323)
     if (uidStr && aTgId && uidStr === aTgId) return true;
@@ -171,6 +217,7 @@ export function isAuthorizedController(
     // 2. Direct Username match (e.g. habib20863)
     if (cleanUsername && aUname && cleanUsername === aUname) return true;
     if (cleanUsername && aName && cleanUsername === aName) return true;
+    if (cleanUsername && aEmail && aEmail.includes(cleanUsername)) return true;
 
     // 3. Cross-field matches (if user stored ID in username field or username in telegramId field)
     if (uidStr && aUname && uidStr === cleanTelegramDigits(a.username)) return true;
@@ -624,21 +671,6 @@ export const getMainMenuKeyboard = () => {
     .row()
     .text("📊 লাইভ স্ট্যাটাস ও হেলথ", "btn_status")
     .text("🔄 রিসেট / হেল্প", "btn_help");
-};
-
-// Persistent Reply Keyboard for bottom menu
-export const getMainMenuReplyKeyboard = () => {
-  return new Keyboard()
-    .text("🔴 লাইভে আইডি যুক্ত করুন")
-    .text("⏹️ লাইভ ছেড়ে আসুন")
-    .row()
-    .text("👥 যুক্ত অ্যাকাউন্ট তালিকা")
-    .text("➕ নতুন অ্যাকাউন্ট যোগ")
-    .row()
-    .text("📊 লাইভ স্ট্যাটাস ও হেলথ")
-    .text("🔄 রিসেট / হেল্প")
-    .resized()
-    .persistent();
 };
 
 export const getCancelKeyboard = () => {
@@ -1288,12 +1320,14 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     // ==========================================
     // 1. DEDUPLICATION & RATE LIMIT MIDDLEWARE
     // ==========================================
+    const processedCallbackIds = new Set<string>();
+
     bot.use(async (ctx, next) => {
       // 1. Check duplicate update_id
       const updateId = ctx.update?.update_id;
       if (updateId) {
         if (processedUpdateIds.has(updateId)) {
-          return; // Duplicate update dropped silently
+          return; // Duplicate network retransmission dropped silently
         }
         processedUpdateIds.add(updateId);
         if (processedUpdateIds.size > 4000) {
@@ -1302,18 +1336,32 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
         }
       }
 
-      // 2. Check duplicate message (chatId + messageId)
-      if (ctx.chat?.id && ctx.message?.message_id) {
+      // 2. Callback query deduplication by UNIQUE callback query ID
+      if (ctx.callbackQuery?.id) {
+        const cbId = ctx.callbackQuery.id;
+        if (processedCallbackIds.has(cbId)) {
+          await ctx.answerCallbackQuery().catch(() => {});
+          return;
+        }
+        processedCallbackIds.add(cbId);
+        if (processedCallbackIds.size > 4000) {
+          const arr = Array.from(processedCallbackIds);
+          arr.slice(0, 2000).forEach((id) => processedCallbackIds.delete(id));
+        }
+      }
+
+      // 3. User text message duplicate protection (only for plain text messages, not callback buttons)
+      if (ctx.message && !ctx.callbackQuery && ctx.chat?.id && ctx.message?.message_id) {
         const msgKey = `${ctx.chat.id}_${ctx.message.message_id}`;
         const now = Date.now();
         const prev = processedMessageKeys.get(msgKey);
-        if (prev && (now - prev) < 15000) {
-          return; // Duplicate message execution dropped
+        if (prev && (now - prev) < 1500) {
+          return; // Duplicate text message dropped
         }
         processedMessageKeys.set(msgKey, now);
         if (processedMessageKeys.size > 4000) {
           for (const [k, time] of processedMessageKeys.entries()) {
-            if (now - time > 60000) {
+            if (now - time > 30000) {
               processedMessageKeys.delete(k);
             }
           }
@@ -1329,12 +1377,13 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
     bot.use(async (ctx, next) => {
       const userId = ctx.from?.id;
       const username = ctx.from?.username;
+      const firstName = ctx.from?.first_name;
 
       if (!userId) {
         return;
       }
 
-      const auth = isAuthorizedController(userId, username);
+      const auth = isAuthorizedController(userId, username, firstName);
       if (!auth.authorized) {
         if (ctx.callbackQuery) {
           try {
@@ -1611,14 +1660,8 @@ ${liveStatusBadge}
 ━━━━━━━━━━━━━━━━━━━━━━━━
 👇 <b>নিচের বোতামগুলো চেপে সরাসরি এক-ক্লিকে নিয়ন্ত্রণ করুন:</b>`;
 
-      // 1. Send bottom persistent reply keyboard
+      // Send single clean welcome message with interactive inline buttons (no duplicate bottom keypad)
       await ctx.reply(welcomeMsg, {
-        parse_mode: "HTML",
-        reply_markup: getMainMenuReplyKeyboard()
-      });
-
-      // 2. Also send inline interactive quick buttons
-      await ctx.reply(`⚡ <b>কুইক অ্যাকশন বাটন প্যানেল:</b>`, {
         parse_mode: "HTML",
         reply_markup: getMainMenuKeyboard()
       });
@@ -1650,54 +1693,54 @@ ${liveStatusBadge}
     // 3. INLINE BUTTON CALLBACKS & PINPAD LOGIC
     // ==========================================
     bot.callbackQuery("btn_join_live", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery().catch(() => {});
       const userId = ctx.from?.id;
       if (userId) await initiateJoinLive(ctx, userId);
     });
 
     bot.callbackQuery("btn_leave_live", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery().catch(() => {});
       await leaveLive(ctx);
     });
 
     bot.callbackQuery("btn_add_account", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery().catch(() => {});
       const userId = ctx.from?.id;
       if (userId) await initiateAddAccount(ctx, userId);
     });
 
     bot.callbackQuery("btn_react_love", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "❤️ লাভ রিয়্যাক্ট পাঠানো হয়েছে!" });
+      await ctx.answerCallbackQuery({ text: "❤️ লাভ রিয়্যাক্ট পাঠানো হয়েছে!" }).catch(() => {});
       await boostLoveReact(ctx);
     });
 
     bot.callbackQuery("btn_react_fire", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "🔥 ফায়ার রিয়্যাক্ট পাঠানো হয়েছে!" });
+      await ctx.answerCallbackQuery({ text: "🔥 ফায়ার রিয়্যাক্ট পাঠানো হয়েছে!" }).catch(() => {});
       await boostFireReact(ctx);
     });
 
     bot.callbackQuery("btn_react_clap", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "👏 তালি রিয়্যাক্ট পাঠানো হয়েছে!" });
+      await ctx.answerCallbackQuery({ text: "👏 তালি রিয়্যাক্ট পাঠানো হয়েছে!" }).catch(() => {});
       await boostClapReact(ctx);
     });
 
     bot.callbackQuery("btn_ping_test", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "⚡ সংযোগ পিং টেস্ট শুরু হচ্ছে..." });
+      await ctx.answerCallbackQuery({ text: "⚡ সংযোগ পিং টেস্ট শুরু হচ্ছে..." }).catch(() => {});
       await testConnectionPing(ctx);
     });
 
     bot.callbackQuery("btn_list_accounts", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "🔒 অ্যাকাউন্ট তালিকা প্রদর্শন বন্ধ আছে।" });
+      await ctx.answerCallbackQuery({ text: "🔒 অ্যাকাউন্ট তালিকা প্রদর্শন বন্ধ আছে।" }).catch(() => {});
       await showAccountList(ctx);
     });
 
     bot.callbackQuery("btn_status", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery().catch(() => {});
       await showLiveStatus(ctx);
     });
 
     bot.callbackQuery("btn_help", async (ctx) => {
-      await ctx.answerCallbackQuery();
+      await ctx.answerCallbackQuery().catch(() => {});
       const userId = ctx.from?.id;
       if (userId) {
         userWizardStates.set(userId, { step: "IDLE", enteredDigits: "", updatedAt: Date.now() });
@@ -1705,8 +1748,17 @@ ${liveStatusBadge}
       await showHelp(ctx);
     });
 
+    bot.callbackQuery("btn_reset", async (ctx) => {
+      await ctx.answerCallbackQuery({ text: "🔄 সেশন রিসেট করা হয়েছে।" }).catch(() => {});
+      const userId = ctx.from?.id;
+      if (userId) {
+        userWizardStates.set(userId, { step: "IDLE", enteredDigits: "", updatedAt: Date.now() });
+        await resetBotSession(ctx, userId);
+      }
+    });
+
     bot.callbackQuery("btn_cancel", async (ctx) => {
-      await ctx.answerCallbackQuery({ text: "বাতিল করা হয়েছে।" });
+      await ctx.answerCallbackQuery({ text: "বাতিল করা হয়েছে।" }).catch(() => {});
       const userId = ctx.from?.id;
       if (userId) await cancelAction(ctx, userId);
     });
