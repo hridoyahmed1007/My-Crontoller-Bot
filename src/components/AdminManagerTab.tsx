@@ -82,7 +82,7 @@ export function AdminManagerTab({
     }
   };
 
-  // Fetch admin controllers list from server with bidirectional recovery
+  // Fetch admin controllers list from server
   const fetchAdmins = async (isInitial = false) => {
     try {
       if (isInitial && admins.length === 0) {
@@ -92,44 +92,8 @@ export function AdminManagerTab({
       if (res.ok) {
         const data = await res.json();
         if (data.admins && Array.isArray(data.admins)) {
-          const serverAdmins: AdminController[] = data.admins;
-          
-          // Check if local cache has any extra admins that server restarted without
-          let localAdmins: AdminController[] = [];
-          try {
-            const raw = localStorage.getItem(STORAGE_KEY_ADMINS);
-            if (raw) localAdmins = JSON.parse(raw) || [];
-          } catch (e) {}
-
-          const missingOnServer = localAdmins.filter(
-            (local) =>
-              !serverAdmins.some(
-                (srv) =>
-                  srv.id === local.id ||
-                  (local.telegramId && srv.telegramId === local.telegramId) ||
-                  (local.username && srv.username?.toLowerCase() === local.username.toLowerCase())
-              )
-          );
-
-          if (missingOnServer.length > 0) {
-            // Restore missing admins to server permanently
-            const syncRes = await fetch('/api/admins/sync', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ admins: localAdmins })
-            });
-            if (syncRes.ok) {
-              const syncData = await syncRes.json();
-              if (syncData.admins) {
-                setAdmins(syncData.admins);
-                persistLocally(syncData.admins);
-                return;
-              }
-            }
-          }
-
-          setAdmins(serverAdmins);
-          persistLocally(serverAdmins);
+          setAdmins(data.admins);
+          persistLocally(data.admins);
         }
       }
     } catch (err) {

@@ -69,13 +69,15 @@ export const botGlobalState: BotState = {
 
 // Admin Controller Management Helpers
 export function getAuthorizedAdmins(): AdminController[] {
-  return botGlobalState.admins;
+  const fresh = loadPersistedAdmins();
+  botGlobalState.admins = fresh;
+  return fresh;
 }
 
 export function addAuthorizedAdmin(admin: AdminController): AdminController[] {
   const updated = upsertAdminPermanently(admin, botGlobalState.admins);
   botGlobalState.admins = updated;
-  addBotLog("success", `[Admin Management] নতুন কন্ট্রোলার যুক্ত করা হয়েছে: ${admin.name} (ID: ${admin.telegramId}, @${admin.username || "N/A"})`);
+  addBotLog("success", `[Admin Management] নতুন কন্ট্রোলার যুক্ত করা হয়েছে: ${admin.name} (ID: ${admin.telegramId || "N/A"}, @${admin.username || "N/A"})`);
   return updated;
 }
 
@@ -91,7 +93,7 @@ export function removeAuthorizedAdmin(idOrTgId: string): AdminController[] {
   const updated = deleteAdminPermanently(idOrTgId, botGlobalState.admins);
   botGlobalState.admins = updated;
   if (admin) {
-    addBotLog("warning", `[Admin Management] কন্ট্রোলার এক্সেস অপসারণ করা হয়েছে: ${admin.name} (ID: ${admin.telegramId})`);
+    addBotLog("warning", `[Admin Management] কন্ট্রোলার এক্সেস অপসারণ করা হয়েছে: ${admin.name} (ID: ${admin.telegramId || "N/A"})`);
   }
   return updated;
 }
@@ -113,7 +115,7 @@ export function isAuthorizedController(
   const uidStr = cleanTelegramDigits(userId);
   const cleanUsername = cleanTelegramUsername(username);
 
-  // 1. Permanent Super Admin Owner (Red marked in UI)
+  // 1. Permanent Super Admin Owner (Always 100% Authorized)
   const isMasterId = uidStr === "7983626971";
   const isMasterUsername = cleanUsername === "thebossbd360";
 
@@ -132,12 +134,12 @@ export function isAuthorizedController(
     return { authorized: true, admin: masterAdmin };
   }
 
-  // 2. Check dynamic authorized admins from botGlobalState or disk
-  const adminList = (botGlobalState.admins && botGlobalState.admins.length > 0)
+  // 2. Check in memory list first
+  let adminList = botGlobalState.admins && botGlobalState.admins.length > 0
     ? botGlobalState.admins
     : loadPersistedAdmins();
 
-  const matched = adminList.find((a) => {
+  let matched = adminList.find((a) => {
     if (!a.isActive) return false;
     const aTgId = cleanTelegramDigits(a.telegramId);
     const aUname = cleanTelegramUsername(a.username);
@@ -147,6 +149,22 @@ export function isAuthorizedController(
 
     return idMatches || unameMatches;
   });
+
+  // If not found in current memory, load directly from disk to be 100% sure
+  if (!matched) {
+    const diskList = loadPersistedAdmins();
+    botGlobalState.admins = diskList;
+    matched = diskList.find((a) => {
+      if (!a.isActive) return false;
+      const aTgId = cleanTelegramDigits(a.telegramId);
+      const aUname = cleanTelegramUsername(a.username);
+
+      const idMatches = Boolean(uidStr && aTgId && uidStr === aTgId);
+      const unameMatches = Boolean(cleanUsername && aUname && cleanUsername === aUname);
+
+      return idMatches || unameMatches;
+    });
+  }
 
   if (matched) {
     return { authorized: true, admin: matched };
