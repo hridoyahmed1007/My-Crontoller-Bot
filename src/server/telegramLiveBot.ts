@@ -115,13 +115,11 @@ export function isAuthorizedController(
 ): { authorized: boolean; admin?: AdminController } {
   const uidStr = cleanTelegramDigits(userId);
   const cleanUsername = cleanTelegramUsername(username);
-  const cleanFirst = cleanTelegramUsername(firstName);
 
-  // 1. Permanent Super Admin Owner & Permanent Primary Controllers (100% Guaranteed Unconditional Access)
+  // 1. Permanent Super Admin Owner (100% Guaranteed Unconditional Access)
   const isMaster =
     uidStr === "7983626971" ||
-    cleanUsername === "thebossbd360" ||
-    cleanUsername === "offline";
+    cleanUsername === "thebossbd360";
 
   if (isMaster) {
     const masterAdmin: AdminController = {
@@ -147,13 +145,10 @@ export function isAuthorizedController(
     return { authorized: true, admin: masterAdmin };
   }
 
+  // 2. Permanent Primary Controller (Habib Hasan - 7297762323 / @habib20863)
   const isHabibHasan =
     uidStr === "7297762323" ||
-    cleanUsername === "habib20863" ||
-    cleanUsername === "hridoyarmy1007" ||
-    cleanUsername === "hridoy1007" ||
-    cleanFirst === "habib" ||
-    cleanFirst === "hridoy";
+    cleanUsername === "habib20863";
 
   if (isHabibHasan) {
     const habibAdmin: AdminController = {
@@ -176,19 +171,19 @@ export function isAuthorizedController(
     return { authorized: true, admin: habibAdmin };
   }
 
-  // 2. Check if matches configured botGlobalState.adminId
-  if (botGlobalState.adminId) {
+  // 3. Check if matches configured botGlobalState.adminId (explicit ID or Username)
+  if (botGlobalState.adminId && botGlobalState.adminId.trim() !== "" && botGlobalState.adminId !== "SuperAdmin") {
     const cfgClean = cleanTelegramUsername(botGlobalState.adminId);
     const cfgDigits = cleanTelegramDigits(botGlobalState.adminId);
-    if (
-      (cfgDigits && cfgDigits === uidStr) ||
-      (cfgClean && (cfgClean === cleanUsername || cfgClean === "superadmin"))
-    ) {
+    if (cfgDigits && uidStr && cfgDigits === uidStr) {
+      return { authorized: true };
+    }
+    if (cfgClean && cleanUsername && cfgClean === cleanUsername) {
       return { authorized: true };
     }
   }
 
-  // 3. Load latest real-time controllers list combining disk and memory
+  // 4. Load latest real-time controllers list combining disk and memory
   const diskList = loadPersistedAdmins();
   const memList = botGlobalState.admins || [];
   const map = new Map<string, AdminController>();
@@ -207,24 +202,12 @@ export function isAuthorizedController(
 
     const aTgId = cleanTelegramDigits(a.telegramId);
     const aUname = cleanTelegramUsername(a.username);
-    const aName = cleanTelegramUsername(a.name);
-    const aIdDigits = cleanTelegramDigits(a.id);
-    const aEmail = cleanTelegramUsername(a.email);
 
     // 1. Direct Telegram ID match (e.g. 7297762323)
     if (uidStr && aTgId && uidStr === aTgId) return true;
 
     // 2. Direct Username match (e.g. habib20863)
     if (cleanUsername && aUname && cleanUsername === aUname) return true;
-    if (cleanUsername && aName && cleanUsername === aName) return true;
-    if (cleanUsername && aEmail && aEmail.includes(cleanUsername)) return true;
-
-    // 3. Cross-field matches (if user stored ID in username field or username in telegramId field)
-    if (uidStr && aUname && uidStr === cleanTelegramDigits(a.username)) return true;
-    if (cleanUsername && aTgId && cleanUsername === cleanTelegramUsername(a.telegramId)) return true;
-
-    // 4. Match against record ID if digits match
-    if (uidStr && aIdDigits && uidStr === aIdDigits) return true;
 
     return false;
   });
@@ -233,7 +216,7 @@ export function isAuthorizedController(
     return { authorized: true, admin: matched };
   }
 
-  // Strictly Unauthorized
+  // Strictly Unauthorized - No Access for anyone else
   return { authorized: false };
 }
 
