@@ -15,6 +15,8 @@ import {
   syncAdminsPermanently,
   deleteAdminPermanently,
   toggleAdminStatusPermanently,
+  cleanTelegramDigits,
+  cleanTelegramUsername,
   AdminController,
   AccountSession,
   AccountConnectionState
@@ -108,8 +110,8 @@ export function isAuthorizedController(
   userId?: number | string | null,
   username?: string | null
 ): { authorized: boolean; admin?: AdminController } {
-  const uidStr = userId ? String(userId).trim() : "";
-  const cleanUsername = username ? username.trim().replace(/^@+/, "").toLowerCase() : "";
+  const uidStr = cleanTelegramDigits(userId);
+  const cleanUsername = cleanTelegramUsername(username);
 
   // 1. Permanent Super Admin Owner (Red marked in UI)
   const isMasterId = uidStr === "7983626971";
@@ -137,11 +139,11 @@ export function isAuthorizedController(
 
   const matched = adminList.find((a) => {
     if (!a.isActive) return false;
-    const aTgId = a.telegramId ? String(a.telegramId).trim() : "";
-    const aUsername = a.username ? a.username.trim().replace(/^@+/, "").toLowerCase() : "";
+    const aTgId = cleanTelegramDigits(a.telegramId);
+    const aUname = cleanTelegramUsername(a.username);
 
     const idMatches = Boolean(uidStr && aTgId && uidStr === aTgId);
-    const unameMatches = Boolean(cleanUsername && aUsername && cleanUsername === aUsername);
+    const unameMatches = Boolean(cleanUsername && aUname && cleanUsername === aUname);
 
     return idMatches || unameMatches;
   });
@@ -1127,11 +1129,16 @@ export async function executeRealMTProtoPing(): Promise<{
 let activeGrammyBot: Bot | null = null;
 let isPollingActive = false;
 let pollingRetryTimer: NodeJS.Timeout | null = null;
+let pollingWatchdogTimer: NodeJS.Timeout | null = null;
 
 export async function stopActiveTelegramBot() {
   if (pollingRetryTimer) {
     clearTimeout(pollingRetryTimer);
     pollingRetryTimer = null;
+  }
+  if (pollingWatchdogTimer) {
+    clearInterval(pollingWatchdogTimer);
+    pollingWatchdogTimer = null;
   }
   if (activeGrammyBot) {
     try {
@@ -1217,23 +1224,27 @@ export async function initAndStartTelegramBot(token: string, adminId: string) {
 
       addBotLog("warning", `অননুমোদিত এক্সেস চেষ্টা: ${firstName} (ID: ${userId}, @${username || "N/A"})`);
 
-      const rejectionMsg = `⛔ <b>অ্যাক্সেস অনুমোদিত নয়!</b>
+      const rejectionMsg = `⛔ <b>আপনার কোনো অ্যাক্সেস নেই!</b>
 ━━━━━━━━━━━━━━━━━━━━━━━━
-👋 দুঃখিত <b>${firstName}</b>, আপনার টেলিগ্রাম অ্যাকাউন্টটি এই বটের অ্যাডমিন বা কন্ট্রোলার হিসেবে নিবন্ধিত নয়।
+👋 দুঃখিত <b>${firstName}</b>, এই টেলিগ্রাম বট নিয়ন্ত্রণ করার কোনো অনুমতি আপনার কাছে নেই।
 
-⚠️ <b>অ্যাডমিন প্যানেল থেকে আপনাকে কোনো এক্সেস দেওয়া হয়নি।</b>
+⚠️ <b>অ্যাক্সেস স্ট্যাটাস:</b> আপনার অ্যাডমিন অ্যাক্সেস অ্যাডমিন প্যানেল থেকে বাতিল করা হয়েছে অথবা আপনাকে এখনও অ্যাডমিন করা হয়নি।
 
 📋 <b>আপনার টেলিগ্রাম তথ্য:</b>
-├ 🆔 <b>আপনার টেলিগ্রাম আইডি:</b> <code>${userId || "অজানা"}</code>
-└ 👤 <b>ইউজারনেম:</b> ${username ? `@${escapeHtml(username)}` : "<i>(কোনো ইউজারনেম সেট করা নেই)</i>"}
+├ 🆔 <b>টেলিগ্রাম আইডি:</b> <code>${userId || "অজানা"}</code>
+└ 👤 <b>ইউজারনেম:</b> ${username ? `@${escapeHtml(username)}` : "<i>(কোনো ইউজারনেম নেই)</i>"}
 
-💡 <i>বটটি ব্যবহারের জন্য এক্সেস প্রয়োজন হলে মূল অ্যাডমিনের সাথে যোগাযোগ করে আপনার টেলিগ্রাম আইডিটি অ্যাডমিন প্যানেলে যুক্ত করিয়ে নিন।</i>`;
+💡 <i>বটের অ্যাক্সেস পেতে সুপার অ্যাডমিনের সাথে যোগাযোগ করে আপনার টেলিগ্রাম আইডিটি অ্যাডমিন প্যানেলে যুক্ত করিয়ে নিন।</i>`;
 
       // Reply with remove_keyboard: true so absolutely no buttons appear for unauthorized users!
-      await ctx.reply(rejectionMsg, {
-        parse_mode: "HTML",
-        reply_markup: { remove_keyboard: true }
-      });
+      try {
+        await ctx.reply(rejectionMsg, {
+          parse_mode: "HTML",
+          reply_markup: { remove_keyboard: true }
+        });
+      } catch (e) {
+        console.error("Failed to send rejection msg:", e);
+      }
     }
 
     // ==========================================
@@ -2403,9 +2414,9 @@ ${participantSummary}
       );
     }
 
-    // 5. Start Long Polling Safely (Clear any dangling webhooks first to avoid 409 Conflict)
+    // 5. Start Long Polling Safely (Clear any dangling webhooks first)
     try {
-      await bot.api.deleteWebhook({ drop_pending_updates: true });
+      await bot.api.deleteWebhook({ drop_pending_updates: false });
     } catch (e) {
       // ignore webhook deletion error if any
     }
@@ -2415,32 +2426,43 @@ ${participantSummary}
       if (!activeGrammyBot || activeGrammyBot !== bot) return;
 
       bot.start({
-        drop_pending_updates: true,
+        drop_pending_updates: false,
         onStart: (info) => {
           isPollingActive = true;
-          addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং শুরু হয়েছে! @${info.username}`);
+          addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং সক্রিয় ও প্রস্তুত! @${info.username}`);
         }
       }).catch(async (err: any) => {
         const errMsg = err?.message || String(err);
         isPollingActive = false;
 
         if (errMsg.includes("409") || errMsg.includes("Conflict") || errMsg.includes("getUpdates")) {
-          console.warn("[Polling Conflict] 409 Conflict: Previous instance disconnecting. Retrying in 3s...");
-          if (retryCount < 5 && activeGrammyBot === bot) {
-            pollingRetryTimer = setTimeout(async () => {
-              try {
-                await bot.api.deleteWebhook({ drop_pending_updates: true }).catch(() => {});
-              } catch (e) {}
-              startPollingWithRetry(retryCount + 1);
-            }, 3000);
-          }
+          console.warn(`[Polling Conflict] 409 Conflict: Previous instance disconnecting. Retrying in 2.5s (attempt ${retryCount + 1})...`);
         } else {
-          console.warn("Polling notice:", errMsg);
+          console.warn("[Polling Error]:", errMsg);
+        }
+
+        if (activeGrammyBot === bot) {
+          if (pollingRetryTimer) clearTimeout(pollingRetryTimer);
+          pollingRetryTimer = setTimeout(async () => {
+            try {
+              await bot.api.deleteWebhook({ drop_pending_updates: false }).catch(() => {});
+            } catch (e) {}
+            startPollingWithRetry(retryCount + 1);
+          }, 2500);
         }
       });
     };
 
     startPollingWithRetry(0);
+
+    // Watchdog to guarantee 100% continuous polling uptime
+    if (pollingWatchdogTimer) clearInterval(pollingWatchdogTimer);
+    pollingWatchdogTimer = setInterval(async () => {
+      if (activeGrammyBot === bot && !isPollingActive) {
+        console.log("[Bot Watchdog] Polling loop was idle/stopped. Restarting polling...");
+        startPollingWithRetry(0);
+      }
+    }, 10000);
 
     // 6. Auto-recover active live stream if previous session was in progress before restart
     if (botGlobalState.activeLive && botGlobalState.accounts.length > 0) {

@@ -42,11 +42,13 @@ export interface AccountSession {
 }
 
 const DATA_DIR = path.join(process.cwd(), "data");
+const SRC_DATA_DIR = path.join(process.cwd(), "src", "data");
 const ACCOUNTS_FILE = path.join(DATA_DIR, "telegram_accounts.json");
 const ACCOUNTS_BACKUP_FILE = path.join(DATA_DIR, "telegram_accounts.bak.json");
 const BOT_CONFIG_FILE = path.join(DATA_DIR, "bot_config.json");
 const ADMINS_FILE = path.join(DATA_DIR, "bot_admins.json");
 const ADMINS_BACKUP_FILE = path.join(DATA_DIR, "bot_admins.bak.json");
+const SRC_ADMINS_FILE = path.join(SRC_DATA_DIR, "persisted_admins.json");
 
 function ensureDataDir() {
   try {
@@ -56,11 +58,22 @@ function ensureDataDir() {
   } catch (err) {
     console.error("[Storage] Failed to create data dir:", err);
   }
+  try {
+    if (!fs.existsSync(SRC_DATA_DIR)) {
+      fs.mkdirSync(SRC_DATA_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error("[Storage] Failed to create src/data dir:", err);
+  }
 }
 
 // Atomic file write to avoid corrupted files on sudden shutdown or crash
 function atomicWriteFileSync(filePath: string, data: string): boolean {
   ensureDataDir();
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
   const tempPath = `${filePath}.tmp.${Date.now()}`;
   try {
     fs.writeFileSync(tempPath, data, "utf-8");
@@ -81,6 +94,23 @@ function atomicWriteFileSync(filePath: string, data: string): boolean {
   }
 }
 
+export function cleanTelegramDigits(val: string | number | undefined | null): string {
+  if (val === undefined || val === null) return "";
+  let str = String(val).trim();
+  const bnDigits = ["০", "১", "২", "৩", "৪", "৫", "৬", "৭", "৮", "৯"];
+  for (let i = 0; i < 10; i++) {
+    str = str.split(bnDigits[i]).join(String(i));
+  }
+  return str.replace(/\D/g, "");
+}
+
+export function cleanTelegramUsername(val: string | undefined | null): string {
+  if (!val) return "";
+  let str = String(val).trim();
+  str = str.replace(/^https?:\/\/t\.me\//i, "").replace(/^t\.me\//i, "");
+  return str.replace(/^@+/, "").toLowerCase().trim();
+}
+
 const MASTER_SUPER_ADMIN_RECORD: AdminController = {
   id: "admin-super-owner",
   name: "offline",
@@ -93,69 +123,61 @@ const MASTER_SUPER_ADMIN_RECORD: AdminController = {
   notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
 };
 
-// Load saved Admin Controllers from disk with dual-file backup resilience
+// Helper to filter out stale unwanted test records
+function sanitizeAdminRecords(list: any[]): AdminController[] {
+  if (!Array.isArray(list)) return [];
+  const valid = list.filter(
+    (a) =>
+      a &&
+      typeof a === "object" &&
+      a.telegramId !== "7297762323" &&
+      a.telegramId !== 7297762323 &&
+      !(a.username && a.username.toLowerCase().includes("habib20863"))
+  );
+  return valid;
+}
+
+// Load saved Admin Controllers from disk with triple-layer persistence resilience
 export function loadPersistedAdmins(): AdminController[] {
   ensureDataDir();
 
-  try {
-    if (fs.existsSync(ADMINS_FILE)) {
-      const raw = fs.readFileSync(ADMINS_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const filtered = parsed.filter(
-          (a) =>
-            a.telegramId !== "7297762323" &&
-            a.telegramId !== 7297762323 &&
-            !(a.username && a.username.toLowerCase().includes("habib20863"))
-        );
+  const candidateAdmins: Map<string, AdminController> = new Map();
+  candidateAdmins.set("7983626971", MASTER_SUPER_ADMIN_RECORD);
 
-        const hasMaster = filtered.some(
-          (a) =>
-            a.telegramId === "7983626971" ||
-            (a.username && a.username.toLowerCase() === "thebossbd360")
-        );
+  const filesToTry = [SRC_ADMINS_FILE, ADMINS_FILE, ADMINS_BACKUP_FILE];
 
-        const cleanList = hasMaster ? filtered : [MASTER_SUPER_ADMIN_RECORD, ...filtered];
-        return cleanList;
+  for (const filePath of filesToTry) {
+    try {
+      if (fs.existsSync(filePath)) {
+        const raw = fs.readFileSync(filePath, "utf-8");
+        const parsed = JSON.parse(raw);
+        const sanitized = sanitizeAdminRecords(parsed);
+        for (const adm of sanitized) {
+          const cleanId = cleanTelegramDigits(adm.telegramId);
+          const cleanUname = cleanTelegramUsername(adm.username);
+          const key = cleanId || cleanUname || adm.id;
+          if (key) {
+            candidateAdmins.set(key, {
+              ...adm,
+              telegramId: cleanId || adm.telegramId,
+              username: cleanUname || adm.username,
+              isActive: adm.isActive ?? true
+            });
+          }
+        }
       }
+    } catch (err) {
+      // Continue to next file
     }
-  } catch (err) {
-    console.error("[Storage] Error loading admins from primary file:", err);
   }
 
-  // Backup fallback
-  try {
-    if (fs.existsSync(ADMINS_BACKUP_FILE)) {
-      const rawBak = fs.readFileSync(ADMINS_BACKUP_FILE, "utf-8");
-      const parsedBak = JSON.parse(rawBak);
-      if (Array.isArray(parsedBak) && parsedBak.length > 0) {
-        const filteredBak = parsedBak.filter(
-          (a) =>
-            a.telegramId !== "7297762323" &&
-            a.telegramId !== 7297762323 &&
-            !(a.username && a.username.toLowerCase().includes("habib20863"))
-        );
-        const hasMaster = filteredBak.some(
-          (a) =>
-            a.telegramId === "7983626971" ||
-            (a.username && a.username.toLowerCase() === "thebossbd360")
-        );
-        const cleanList = hasMaster ? filteredBak : [MASTER_SUPER_ADMIN_RECORD, ...filteredBak];
-        savePersistedAdmins(cleanList);
-        return cleanList;
-      }
-    }
-  } catch (err) {
-    console.error("[Storage] Error loading admins from backup file:", err);
-  }
-
-  // Seed default admin only if completely clean installation
-  const defaultAdmins = [MASTER_SUPER_ADMIN_RECORD];
-  savePersistedAdmins(defaultAdmins);
-  return defaultAdmins;
+  const finalAdmins = Array.from(candidateAdmins.values());
+  // Write back to sync all locations
+  savePersistedAdmins(finalAdmins);
+  return finalAdmins;
 }
 
-// Save Admin Controllers permanently to disk and mirror to backup
+// Save Admin Controllers permanently to disk across all 3 tiers
 export function savePersistedAdmins(admins: AdminController[]): boolean {
   ensureDataDir();
   try {
@@ -163,12 +185,10 @@ export function savePersistedAdmins(admins: AdminController[]): boolean {
     const success1 = atomicWriteFileSync(ADMINS_FILE, serialized);
     try {
       atomicWriteFileSync(ADMINS_BACKUP_FILE, serialized);
-    } catch (e) {
-      // backup failure is non-blocking
-    }
-    if (success1) {
-      console.log(`[Storage] Permanently saved ${admins.length} admins to ${ADMINS_FILE}`);
-    }
+    } catch (e) {}
+    try {
+      atomicWriteFileSync(SRC_ADMINS_FILE, serialized);
+    } catch (e) {}
     return success1;
   } catch (err) {
     console.error("[Storage] Failed to save admins to file:", err);
@@ -178,23 +198,32 @@ export function savePersistedAdmins(admins: AdminController[]): boolean {
 
 // Add or update admin permanently
 export function upsertAdminPermanently(admin: AdminController, currentAdmins: AdminController[]): AdminController[] {
-  const cleanTgId = (admin.telegramId || "").trim();
-  const cleanUsername = (admin.username || "").trim().replace(/^@/, "").toLowerCase();
+  const cleanTgId = cleanTelegramDigits(admin.telegramId);
+  const cleanUname = cleanTelegramUsername(admin.username);
 
-  const index = currentAdmins.findIndex(
-    (a) => a.id === admin.id || (cleanTgId && a.telegramId === cleanTgId) || (cleanUsername && a.username?.toLowerCase() === cleanUsername)
-  );
+  const cleanedAdmin: AdminController = {
+    ...admin,
+    telegramId: cleanTgId || admin.telegramId,
+    username: cleanUname || admin.username,
+    isActive: admin.isActive ?? true
+  };
+
+  const index = currentAdmins.findIndex((a) => {
+    const aId = cleanTelegramDigits(a.telegramId);
+    const aUname = cleanTelegramUsername(a.username);
+    return a.id === admin.id || (cleanTgId && aId === cleanTgId) || (cleanUname && aUname === cleanUname);
+  });
 
   let updatedList: AdminController[];
   if (index >= 0) {
     updatedList = [...currentAdmins];
     updatedList[index] = {
       ...updatedList[index],
-      ...admin,
+      ...cleanedAdmin,
       id: updatedList[index].id || admin.id
     };
   } else {
-    updatedList = [admin, ...currentAdmins];
+    updatedList = [cleanedAdmin, ...currentAdmins];
   }
 
   savePersistedAdmins(updatedList);
@@ -207,21 +236,30 @@ export function syncAdminsPermanently(incomingAdmins: AdminController[], current
 
   for (const inc of incomingAdmins) {
     if (!inc.telegramId && !inc.username) continue;
-    const cleanTgId = (inc.telegramId || "").trim();
-    const cleanUsername = (inc.username || "").trim().replace(/^@/, "").toLowerCase();
+    const cleanTgId = cleanTelegramDigits(inc.telegramId);
+    const cleanUname = cleanTelegramUsername(inc.username);
 
-    const exists = merged.findIndex(
-      (a) => a.id === inc.id || (cleanTgId && a.telegramId === cleanTgId) || (cleanUsername && a.username?.toLowerCase() === cleanUsername)
-    );
+    const exists = merged.findIndex((a) => {
+      const aId = cleanTelegramDigits(a.telegramId);
+      const aUname = cleanTelegramUsername(a.username);
+      return a.id === inc.id || (cleanTgId && aId === cleanTgId) || (cleanUname && aUname === cleanUname);
+    });
+
+    const sanitizedInc: AdminController = {
+      ...inc,
+      telegramId: cleanTgId || inc.telegramId,
+      username: cleanUname || inc.username,
+      isActive: inc.isActive ?? true
+    };
 
     if (exists >= 0) {
       merged[exists] = {
         ...merged[exists],
-        ...inc,
+        ...sanitizedInc,
         id: merged[exists].id || inc.id
       };
     } else {
-      merged.push(inc);
+      merged.push(sanitizedInc);
     }
   }
 
@@ -231,12 +269,23 @@ export function syncAdminsPermanently(incomingAdmins: AdminController[], current
 
 // Delete admin permanently (Master super admin is protected)
 export function deleteAdminPermanently(idOrTgId: string, currentAdmins: AdminController[]): AdminController[] {
-  const updatedList = currentAdmins.filter(
-    (a) =>
-      (a.id !== idOrTgId && a.telegramId !== idOrTgId) ||
-      a.telegramId === "7983626971" ||
-      (a.username && a.username.toLowerCase() === "thebossbd360")
-  );
+  const cleanQueryId = cleanTelegramDigits(idOrTgId);
+  const cleanQueryUname = cleanTelegramUsername(idOrTgId);
+
+  const updatedList = currentAdmins.filter((a) => {
+    // Master super admin is untouchable
+    if (a.telegramId === "7983626971" || cleanTelegramUsername(a.username) === "thebossbd360") {
+      return true;
+    }
+    const aId = cleanTelegramDigits(a.telegramId);
+    const aUname = cleanTelegramUsername(a.username);
+
+    if (a.id === idOrTgId) return false;
+    if (cleanQueryId && aId === cleanQueryId) return false;
+    if (cleanQueryUname && aUname === cleanQueryUname) return false;
+    return true;
+  });
+
   savePersistedAdmins(updatedList);
   return updatedList;
 }
