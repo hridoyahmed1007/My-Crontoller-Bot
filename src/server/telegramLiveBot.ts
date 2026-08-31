@@ -2439,19 +2439,25 @@ ${participantSummary}
       // ignore webhook deletion error if any
     }
 
-    isPollingActive = true;
+    let isStartingOrPolling = false;
     const startPollingWithRetry = (retryCount = 0) => {
       if (!activeGrammyBot || activeGrammyBot !== bot) return;
+      if (isStartingOrPolling) return;
+      isStartingOrPolling = true;
 
       bot.start({
         drop_pending_updates: false,
         onStart: (info) => {
           isPollingActive = true;
-          addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং সক্রিয় ও প্রস্তুত! @${info.username}`);
+          isStartingOrPolling = true;
+          if (retryCount === 0) {
+            addBotLog("success", `🚀 টেলিগ্রাম বট লাইভ পোলিং সক্রিয় ও প্রস্তুত! @${info.username}`);
+          }
         }
       }).catch(async (err: any) => {
         const errMsg = err?.message || String(err);
         isPollingActive = false;
+        isStartingOrPolling = false;
 
         if (errMsg.includes("409") || errMsg.includes("Conflict") || errMsg.includes("getUpdates")) {
           console.warn(`[Polling Conflict] 409 Conflict: Previous instance disconnecting. Retrying in 2.5s (attempt ${retryCount + 1})...`);
@@ -2476,11 +2482,11 @@ ${participantSummary}
     // Watchdog to guarantee 100% continuous polling uptime
     if (pollingWatchdogTimer) clearInterval(pollingWatchdogTimer);
     pollingWatchdogTimer = setInterval(async () => {
-      if (activeGrammyBot === bot && !isPollingActive) {
+      if (activeGrammyBot === bot && !isPollingActive && !isStartingOrPolling) {
         console.log("[Bot Watchdog] Polling loop was idle/stopped. Restarting polling...");
         startPollingWithRetry(0);
       }
-    }, 10000);
+    }, 15000);
 
     // 6. Auto-recover active live stream if previous session was in progress before restart
     if (botGlobalState.activeLive && botGlobalState.accounts.length > 0) {
