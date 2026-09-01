@@ -17,6 +17,7 @@ import {
   toggleAdminStatusPermanently,
   cleanTelegramDigits,
   cleanTelegramUsername,
+  PERMANENT_CORE_ADMINS,
   AdminController,
   AccountSession,
   AccountConnectionState
@@ -145,30 +146,15 @@ export function isAuthorizedController(
     return { authorized: true, admin: masterAdmin };
   }
 
-  // 2. Permanent Primary Controller (Habib Hasan - 7297762323 / @habib20863)
-  const isHabibHasan =
-    uidStr === "7297762323" ||
-    cleanUsername === "habib20863";
-
-  if (isHabibHasan) {
-    const habibAdmin: AdminController = {
-      id: "admin_1788192434241_o65g",
-      name: "Habib Hasan",
-      telegramId: "7297762323",
-      username: "habib20863",
-      email: "hridoyarmy1007@gmail.com",
-      role: "controller",
-      addedAt: "৩১ আগস্ট, ২০২৬",
-      isActive: true,
-      notes: "অনুমোদিত প্রধান কন্ট্রোলার অ্যাডমিন",
-      permissions: [
-        "manage_accounts",
-        "reactions_comments",
-        "speaker_stage",
-        "live_control"
-      ]
-    };
-    return { authorized: true, admin: habibAdmin };
+  // 2. Permanent Core Admins (Habib Hasan, Tahsan Ahmed, etc.)
+  for (const coreAdmin of PERMANENT_CORE_ADMINS) {
+    const cTgId = cleanTelegramDigits(coreAdmin.telegramId);
+    const cUname = cleanTelegramUsername(coreAdmin.username);
+    if ((uidStr && cTgId && uidStr === cTgId) || (cleanUsername && cUname && cleanUsername === cUname)) {
+      if (coreAdmin.isActive !== false) {
+        return { authorized: true, admin: coreAdmin };
+      }
+    }
   }
 
   // 3. Check if matches configured botGlobalState.adminId (explicit ID or Username)
@@ -187,7 +173,7 @@ export function isAuthorizedController(
   const diskList = loadPersistedAdmins();
   const memList = botGlobalState.admins || [];
   const map = new Map<string, AdminController>();
-  for (const a of [...diskList, ...memList]) {
+  for (const a of [...PERMANENT_CORE_ADMINS, ...diskList, ...memList]) {
     if (a) {
       const key = a.id || a.telegramId || a.username || Math.random().toString();
       map.set(key, a);
@@ -203,10 +189,10 @@ export function isAuthorizedController(
     const aTgId = cleanTelegramDigits(a.telegramId);
     const aUname = cleanTelegramUsername(a.username);
 
-    // 1. Direct Telegram ID match (e.g. 7297762323)
+    // 1. Direct Telegram ID match (e.g. 7297762323 or 8552972620)
     if (uidStr && aTgId && uidStr === aTgId) return true;
 
-    // 2. Direct Username match (e.g. habib20863)
+    // 2. Direct Username match (e.g. habib20863 or tahsan_ahmed12)
     if (cleanUsername && aUname && cleanUsername === aUname) return true;
 
     return false;
@@ -214,6 +200,34 @@ export function isAuthorizedController(
 
   if (matched) {
     return { authorized: true, admin: matched };
+  }
+
+  // 5. Check if user belongs to registered Telegram Accounts cluster (e.g. Added MTProto Accounts)
+  const registeredAccounts = botGlobalState.accounts && botGlobalState.accounts.length > 0
+    ? botGlobalState.accounts
+    : loadPersistedAccounts();
+
+  const matchedAccount = registeredAccounts.find((acc) => {
+    const accTgId = cleanTelegramDigits(acc.telegramId);
+    const accUname = cleanTelegramUsername(acc.username);
+    if (uidStr && accTgId && uidStr === accTgId) return true;
+    if (cleanUsername && accUname && cleanUsername === accUname) return true;
+    return false;
+  });
+
+  if (matchedAccount) {
+    const accAdmin: AdminController = {
+      id: `admin_acc_${matchedAccount.id}`,
+      name: matchedAccount.name || (matchedAccount.username ? `@${matchedAccount.username}` : "Controller Account"),
+      telegramId: String(matchedAccount.telegramId || uidStr || ""),
+      username: matchedAccount.username || cleanUsername || "",
+      role: "controller",
+      addedAt: matchedAccount.verifiedAt || "১ সেপ্টেম্বর, ২০২৬",
+      isActive: true,
+      notes: "অনুমোদিত ক্লাস্টার অ্যাকাউন্ট কন্ট্রোলার",
+      permissions: ["live_control", "manage_accounts", "reactions_comments", "speaker_stage"]
+    };
+    return { authorized: true, admin: accAdmin };
   }
 
   // Strictly Unauthorized - No Access for anyone else

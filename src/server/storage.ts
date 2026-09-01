@@ -143,9 +143,27 @@ export const MASTER_CONTROLLER_HABIB: AdminController = {
   ]
 };
 
+export const MASTER_CONTROLLER_TAHSAN: AdminController = {
+  id: "admin_1788192999123_tahs",
+  name: "Tahsan Ahmed",
+  telegramId: "8552972620",
+  username: "Tahsan_Ahmed12",
+  role: "controller",
+  addedAt: "১ সেপ্টেম্বর, ২০২৬",
+  isActive: true,
+  notes: "অনুমোদিত স্থায়ী কন্ট্রোলার অ্যাডমিন",
+  permissions: [
+    "live_control",
+    "manage_accounts",
+    "reactions_comments",
+    "speaker_stage"
+  ]
+};
+
 export const PERMANENT_CORE_ADMINS: AdminController[] = [
   MASTER_SUPER_ADMIN_RECORD,
-  MASTER_CONTROLLER_HABIB
+  MASTER_CONTROLLER_HABIB,
+  MASTER_CONTROLLER_TAHSAN
 ];
 
 // Helper to sanitize admin records without filtering out valid controllers

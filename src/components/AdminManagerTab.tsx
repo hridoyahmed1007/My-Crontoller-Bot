@@ -66,6 +66,19 @@ const PERMANENT_DEFAULT_ADMINS: AdminController[] = [
     isActive: true,
     notes: 'অনুমোদিত স্থায়ী প্রধান কন্ট্রোলার অ্যাডমিন',
     permissions: ['live_control', 'manage_accounts', 'reactions_comments', 'speaker_stage']
+  },
+  {
+    id: 'admin_1788250066739_0szz',
+    name: 'Tahsan Ahmed',
+    telegramId: '8552972620',
+    username: 'tahsan_ahmed12',
+    email: 'hridoyahmed1004@gmail.com',
+    password: 'hridoy11',
+    role: 'controller',
+    addedAt: '১ সেপ্টেম্বর, ২০২৬',
+    isActive: true,
+    notes: 'অনুমোদিত স্থায়ী কন্ট্রোলার অ্যাডমিন',
+    permissions: ['live_control', 'manage_accounts', 'reactions_comments', 'speaker_stage']
   }
 ];
 
