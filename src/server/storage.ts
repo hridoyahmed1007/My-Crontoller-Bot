@@ -48,6 +48,7 @@ const ACCOUNTS_BACKUP_FILE = path.join(DATA_DIR, "telegram_accounts.bak.json");
 const BOT_CONFIG_FILE = path.join(DATA_DIR, "bot_config.json");
 const ADMINS_FILE = path.join(DATA_DIR, "bot_admins.json");
 const ADMINS_BACKUP_FILE = path.join(DATA_DIR, "bot_admins.bak.json");
+const ADMINS_VAULT_FILE = path.join(DATA_DIR, "permanent_admins_vault.json");
 
 function ensureDataDir() {
   try {
@@ -103,7 +104,7 @@ export function cleanTelegramUsername(val: string | undefined | null): string {
   return str.replace(/^@+/, "").toLowerCase().trim();
 }
 
-const MASTER_SUPER_ADMIN_RECORD: AdminController = {
+export const MASTER_SUPER_ADMIN_RECORD: AdminController = {
   id: "admin-super-owner",
   name: "offline",
   telegramId: "7983626971",
@@ -113,8 +114,39 @@ const MASTER_SUPER_ADMIN_RECORD: AdminController = {
   addedAt: "২৯ আগস্ট, ২০২৬",
   isActive: true,
   notes: "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক",
-  permissions: ["full_access", "live_control", "manage_accounts", "reaction_control", "manage_admins"]
+  permissions: [
+    "full_access",
+    "live_control",
+    "manage_accounts",
+    "reactions_comments",
+    "speaker_stage",
+    "manage_admins"
+  ]
 };
+
+export const MASTER_CONTROLLER_HABIB: AdminController = {
+  id: "admin_1788192434241_o65g",
+  name: "Habib Hasan",
+  telegramId: "7297762323",
+  username: "habib20863",
+  email: "hridoyarmy1007@gmail.com",
+  password: "hridoy1007",
+  role: "controller",
+  addedAt: "৩১ আগস্ট, ২০২৬",
+  isActive: true,
+  notes: "অনুমোদিত স্থায়ী প্রধান কন্ট্রোলার অ্যাডমিন",
+  permissions: [
+    "live_control",
+    "manage_accounts",
+    "reactions_comments",
+    "speaker_stage"
+  ]
+};
+
+export const PERMANENT_CORE_ADMINS: AdminController[] = [
+  MASTER_SUPER_ADMIN_RECORD,
+  MASTER_CONTROLLER_HABIB
+];
 
 // Helper to sanitize admin records without filtering out valid controllers
 function sanitizeAdminRecords(list: any[]): AdminController[] {
@@ -128,23 +160,37 @@ function sanitizeAdminRecords(list: any[]): AdminController[] {
   return valid;
 }
 
+// Merge list ensuring core permanent admins are never missing
+function ensureCoreAdminsPresent(list: AdminController[]): AdminController[] {
+  const merged = [...list];
+  for (const core of PERMANENT_CORE_ADMINS) {
+    const cleanCoreId = cleanTelegramDigits(core.telegramId);
+    const cleanCoreUname = cleanTelegramUsername(core.username);
+    const exists = merged.some(
+      (a) =>
+        a.id === core.id ||
+        (cleanCoreId && cleanTelegramDigits(a.telegramId) === cleanCoreId) ||
+        (cleanCoreUname && cleanTelegramUsername(a.username) === cleanCoreUname)
+    );
+    if (!exists) {
+      merged.push(core);
+    }
+  }
+  return merged;
+}
+
 // Load saved Admin Controllers from disk cleanly and reliably
 export function loadPersistedAdmins(): AdminController[] {
   ensureDataDir();
 
-  // Try primary ADMINS_FILE first
+  // 1. Try primary ADMINS_FILE first
   try {
     if (fs.existsSync(ADMINS_FILE)) {
       const raw = fs.readFileSync(ADMINS_FILE, "utf-8");
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) {
         const sanitized = sanitizeAdminRecords(parsed);
-        const hasMaster = sanitized.some(
-          (a) =>
-            cleanTelegramDigits(a.telegramId) === "7983626971" ||
-            cleanTelegramUsername(a.username) === "thebossbd360"
-        );
-        const finalAdmins = hasMaster ? sanitized : [MASTER_SUPER_ADMIN_RECORD, ...sanitized];
+        const finalAdmins = ensureCoreAdminsPresent(sanitized);
         return finalAdmins;
       }
     }
@@ -152,19 +198,30 @@ export function loadPersistedAdmins(): AdminController[] {
     console.warn("[Storage] Warning loading primary admins file:", err);
   }
 
-  // Backup fallback
+  // 2. Try ADMINS_VAULT_FILE fallback
+  try {
+    if (fs.existsSync(ADMINS_VAULT_FILE)) {
+      const rawVault = fs.readFileSync(ADMINS_VAULT_FILE, "utf-8");
+      const parsedVault = JSON.parse(rawVault);
+      if (Array.isArray(parsedVault) && parsedVault.length > 0) {
+        const sanitizedVault = sanitizeAdminRecords(parsedVault);
+        const finalVault = ensureCoreAdminsPresent(sanitizedVault);
+        savePersistedAdmins(finalVault);
+        return finalVault;
+      }
+    }
+  } catch (err) {
+    console.warn("[Storage] Warning loading vault admins file:", err);
+  }
+
+  // 3. Try Backup fallback
   try {
     if (fs.existsSync(ADMINS_BACKUP_FILE)) {
       const rawBak = fs.readFileSync(ADMINS_BACKUP_FILE, "utf-8");
       const parsedBak = JSON.parse(rawBak);
       if (Array.isArray(parsedBak) && parsedBak.length > 0) {
         const sanitizedBak = sanitizeAdminRecords(parsedBak);
-        const hasMaster = sanitizedBak.some(
-          (a) =>
-            cleanTelegramDigits(a.telegramId) === "7983626971" ||
-            cleanTelegramUsername(a.username) === "thebossbd360"
-        );
-        const finalBak = hasMaster ? sanitizedBak : [MASTER_SUPER_ADMIN_RECORD, ...sanitizedBak];
+        const finalBak = ensureCoreAdminsPresent(sanitizedBak);
         savePersistedAdmins(finalBak);
         return finalBak;
       }
@@ -173,27 +230,25 @@ export function loadPersistedAdmins(): AdminController[] {
     console.error("[Storage] Error loading backup admins file:", err);
   }
 
-  // Default seed
-  const defaultList = [MASTER_SUPER_ADMIN_RECORD];
+  // 4. Default seed with permanent core admins
+  const defaultList = [...PERMANENT_CORE_ADMINS];
   savePersistedAdmins(defaultList);
   return defaultList;
 }
 
-// Save Admin Controllers permanently to disk
+// Save Admin Controllers permanently to disk across all vault layers
 export function savePersistedAdmins(admins: AdminController[]): boolean {
   ensureDataDir();
   try {
-    const hasMaster = admins.some(
-      (a) =>
-        cleanTelegramDigits(a.telegramId) === "7983626971" ||
-        cleanTelegramUsername(a.username) === "thebossbd360"
-    );
-    const fullList = hasMaster ? admins : [MASTER_SUPER_ADMIN_RECORD, ...admins];
+    const fullList = ensureCoreAdminsPresent(admins);
     const serialized = JSON.stringify(fullList, null, 2);
 
     const success1 = atomicWriteFileSync(ADMINS_FILE, serialized);
     try {
       atomicWriteFileSync(ADMINS_BACKUP_FILE, serialized);
+    } catch (e) {}
+    try {
+      atomicWriteFileSync(ADMINS_VAULT_FILE, serialized);
     } catch (e) {}
 
     return success1;

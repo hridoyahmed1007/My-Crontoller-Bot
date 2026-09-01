@@ -41,26 +41,58 @@ interface AdminManagerTabProps {
 
 const STORAGE_KEY_ADMINS = 'tg_bot_persisted_admins_permanent_v1';
 
+const PERMANENT_DEFAULT_ADMINS: AdminController[] = [
+  {
+    id: 'admin-super-owner',
+    name: 'offline',
+    telegramId: '7983626971',
+    username: 'thebossbd360',
+    email: 'anarulislamai1020@gmail.com',
+    role: 'super_admin',
+    addedAt: '২৯ আগস্ট, ২০২৬',
+    isActive: true,
+    notes: 'প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক',
+    permissions: ['full_access', 'live_control', 'manage_accounts', 'reactions_comments', 'speaker_stage', 'manage_admins']
+  },
+  {
+    id: 'admin_1788192434241_o65g',
+    name: 'Habib Hasan',
+    telegramId: '7297762323',
+    username: 'habib20863',
+    email: 'hridoyarmy1007@gmail.com',
+    password: 'hridoy1007',
+    role: 'controller',
+    addedAt: '৩১ আগস্ট, ২০২৬',
+    isActive: true,
+    notes: 'অনুমোদিত স্থায়ী প্রধান কন্ট্রোলার অ্যাডমিন',
+    permissions: ['live_control', 'manage_accounts', 'reactions_comments', 'speaker_stage']
+  }
+];
+
 export function AdminManagerTab({
   accounts = [],
   onDeleteAccount,
   onToggleSelect,
   isLiveActive = false
 }: AdminManagerTabProps) {
-  // Initialize immediately from localStorage for zero delay
+  // Initialize immediately from localStorage and permanent defaults for zero delay
   const [admins, setAdmins] = useState<AdminController[]>(() => {
     try {
       const cached = localStorage.getItem(STORAGE_KEY_ADMINS);
       if (cached) {
         const parsed = JSON.parse(cached);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          const map = new Map<string, AdminController>();
+          for (const item of [...PERMANENT_DEFAULT_ADMINS, ...parsed]) {
+            if (item && item.id) map.set(item.id, item);
+          }
+          return Array.from(map.values());
         }
       }
     } catch (e) {
       // ignore
     }
-    return [];
+    return PERMANENT_DEFAULT_ADMINS;
   });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -97,7 +129,7 @@ export function AdminManagerTab({
     }
   };
 
-  // Fetch admin controllers list from server
+  // Fetch admin controllers list from server with bidirectional synchronization
   const fetchAdmins = async (isInitial = false) => {
     try {
       if (isInitial && admins.length === 0) {
@@ -107,8 +139,26 @@ export function AdminManagerTab({
       if (res.ok) {
         const data = await res.json();
         if (data.admins && Array.isArray(data.admins)) {
-          setAdmins(data.admins);
-          persistLocally(data.admins);
+          const serverAdmins: AdminController[] = data.admins;
+          
+          // Merge local cache and server to prevent any loss
+          const mergedMap = new Map<string, AdminController>();
+          for (const a of [...PERMANENT_DEFAULT_ADMINS, ...admins, ...serverAdmins]) {
+            if (a && a.id) mergedMap.set(a.id, a);
+          }
+          const mergedList = Array.from(mergedMap.values());
+          
+          setAdmins(mergedList);
+          persistLocally(mergedList);
+
+          // If local has admins missing on the server, auto-sync to server
+          if (mergedList.length > serverAdmins.length) {
+            fetch('/api/admins/sync', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ admins: mergedList })
+            }).catch(() => {});
+          }
         }
       }
     } catch (err) {

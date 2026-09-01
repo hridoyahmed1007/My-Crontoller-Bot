@@ -8,6 +8,32 @@
     "role": "super_admin",
     "addedAt": "২৯ আগস্ট, ২০২৬",
     "isActive": true,
-    "notes": "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক"
+    "notes": "প্রধান সুপার অ্যাডমিন ও একমাত্র অনুমোদিত মালিক",
+    "permissions": [
+      "full_access",
+      "live_control",
+      "manage_accounts",
+      "reactions_comments",
+      "speaker_stage",
+      "manage_admins"
+    ]
+  },
+  {
+    "id": "admin_1788192434241_o65g",
+    "name": "Habib Hasan",
+    "telegramId": "7297762323",
+    "username": "habib20863",
+    "email": "hridoyarmy1007@gmail.com",
+    "password": "hridoy1007",
+    "role": "controller",
+    "addedAt": "৩১ আগস্ট, ২০২৬",
+    "isActive": true,
+    "notes": "অনুমোদিত স্থায়ী প্রধান কন্ট্রোলার অ্যাডমিন",
+    "permissions": [
+      "live_control",
+      "manage_accounts",
+      "reactions_comments",
+      "speaker_stage"
+    ]
   }
 ]

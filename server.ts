@@ -86,15 +86,6 @@ async function startServer() {
     });
   });
 
-  // Authorized Admins API
-  app.get("/api/admins", (_req, res) => {
-    const admins = getAuthorizedAdmins();
-    res.json({
-      success: true,
-      admins
-    });
-  });
-
   const MASTER_SUPER_ADMIN: AdminController = {
     id: "admin-super-owner",
     name: "offline",
