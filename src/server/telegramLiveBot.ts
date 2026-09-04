@@ -22,6 +22,11 @@ import {
   AccountSession,
   AccountConnectionState
 } from "./storage";
+import {
+  dbGetAdminByUserIdOrUsername,
+  dbSetLiveConnectionState,
+  dbResetLiveConnectionsToManualLeave
+} from "./database";
 
 export type { AccountSession, AccountConnectionState };
 
@@ -157,7 +162,13 @@ export function isAuthorizedController(
     }
   }
 
-  // 3. Check if matches configured botGlobalState.adminId (explicit ID or Username)
+  // 3. Database Direct Query (100% Persistent SQLite Database Layer)
+  const dbAdmin = dbGetAdminByUserIdOrUsername(uidStr, cleanUsername);
+  if (dbAdmin && dbAdmin.isActive !== false) {
+    return { authorized: true, admin: dbAdmin };
+  }
+
+  // 4. Check if matches configured botGlobalState.adminId (explicit ID or Username)
   if (botGlobalState.adminId && botGlobalState.adminId.trim() !== "" && botGlobalState.adminId !== "SuperAdmin") {
     const cfgClean = cleanTelegramUsername(botGlobalState.adminId);
     const cfgDigits = cleanTelegramDigits(botGlobalState.adminId);
@@ -169,7 +180,7 @@ export function isAuthorizedController(
     }
   }
 
-  // 4. Load latest real-time controllers list combining disk and memory
+  // 5. Load latest real-time controllers list combining database, vault, and disk
   const diskList = loadPersistedAdmins();
   const memList = botGlobalState.admins || [];
   const map = new Map<string, AdminController>();
@@ -246,6 +257,8 @@ export interface PendingAuthSession {
 export const pendingAuthSessions = new Map<string, PendingAuthSession>();
 
 // Active Live Stream MTProto Sessions (Maintains active voice chat / channel listener connection)
+export type LiveConnectionState = "IDLE" | "JOINING" | "CONNECTED" | "RECONNECTING" | "DISCONNECTED" | "MANUAL_LEAVE";
+
 export interface ActiveLiveClientSession {
   client: TelegramClient;
   call?: Api.InputGroupCall;
@@ -258,6 +271,9 @@ export interface ActiveLiveClientSession {
   ssrc?: number;
   liveStreamHash?: string;
   lastHeartbeat?: number;
+  connectionState: LiveConnectionState;
+  reconnectAttempts: number;
+  targetLive: string;
 }
 export const activeLiveClientsMap = new Map<string, ActiveLiveClientSession>();
 let liveStreamKeepAliveTimer: NodeJS.Timeout | null = null;
@@ -346,10 +362,11 @@ let isGuardianLoopRunning = false;
 export function startLiveKeepAlive() {
   if (liveStreamKeepAliveTimer) return;
 
-  addBotLog("info", "🛡️ [Live Guardian] আল্ট্রা-ফাস্ট (২.৫ সেকেন্ড) পার্মানেন্ট লাইভ কিপ-অ্যালাইভ ইঞ্জিন সক্রিয় হয়েছে।");
+  addBotLog("info", "🛡️ [Live Guardian] স্থায়ী লাইভ সংযোগ সংরক্ষণ ইঞ্জিন সক্রিয় হয়েছে (Non-destructive Socket Monitor)।");
 
+  // Run health check every 15 seconds (passive socket maintenance, no destructive re-joining)
   liveStreamKeepAliveTimer = setInterval(async () => {
-    if (isGuardianLoopRunning) return; // Prevent overlapping runs
+    if (isGuardianLoopRunning) return;
     if (activeLiveClientsMap.size === 0 || !botGlobalState.activeLive) {
       if (liveStreamKeepAliveTimer) {
         clearInterval(liveStreamKeepAliveTimer);
@@ -363,24 +380,60 @@ export function startLiveKeepAlive() {
       heartbeatCounter++;
       const sessions = Array.from(activeLiveClientsMap.values());
 
-      // Concurrently maintain each account session with full multi-account failure isolation
       await Promise.allSettled(
         sessions.map(async (session) => {
           try {
             if (!session.client) return;
 
-            // 1. Maintain active TCP / MTProto socket connection with instant silent reconnection
+            // Never disrupt sessions that are in MANUAL_LEAVE
+            if (session.connectionState === "MANUAL_LEAVE") return;
+
+            // 1. Check MTProto TCP socket connectivity
             if (!session.client.connected) {
+              session.connectionState = "RECONNECTING";
+              session.reconnectAttempts = (session.reconnectAttempts || 0) + 1;
+
+              dbSetLiveConnectionState({
+                account_id: session.accountId,
+                phone: session.phone,
+                state: "RECONNECTING",
+                target_live: session.targetLive,
+                reconnect_attempts: session.reconnectAttempts
+              });
+
               try {
+                // Exponential backoff delay based on attempt
+                const backoffDelay = Math.min(session.reconnectAttempts * 2000, 15000);
+                await new Promise((r) => setTimeout(r, backoffDelay));
+
                 await session.client.connect();
-              } catch (connErr: any) {
-                const cMsg = connErr?.message || String(connErr);
-                if (cMsg.includes("AUTH_KEY_UNREGISTERED") || cMsg.includes("SESSION_REVOKED") || cMsg.includes("USER_DEACTIVATED")) {
+
+                const isAuth = await session.client.isUserAuthorized().catch(() => false);
+                if (isAuth) {
+                  session.connectionState = "CONNECTED";
+                  session.reconnectAttempts = 0;
+                  session.lastHeartbeat = Date.now();
+
+                  dbSetLiveConnectionState({
+                    account_id: session.accountId,
+                    phone: session.phone,
+                    state: "CONNECTED",
+                    target_live: session.targetLive,
+                    last_heartbeat: Date.now(),
+                    reconnect_attempts: 0
+                  });
+                } else {
+                  session.connectionState = "DISCONNECTED";
+                }
+              } catch (reconnErr: any) {
+                const rMsg = reconnErr?.message || String(reconnErr);
+                if (rMsg.includes("AUTH_KEY_UNREGISTERED") || rMsg.includes("SESSION_REVOKED")) {
+                  session.connectionState = "DISCONNECTED";
                   const targetAcc = botGlobalState.accounts.find(a => a.id === session.accountId);
                   if (targetAcc) {
                     targetAcc.status = "authentication_required";
                     targetAcc.connectionState = "AUTH_REQUIRED";
-                    targetAcc.lastError = cMsg;
+                    targetAcc.lastError = rMsg;
                     savePersistedAccounts(botGlobalState.accounts);
                   }
                 }
@@ -388,58 +441,37 @@ export function startLiveKeepAlive() {
               }
             }
 
-            // 2. Continuous 2.5s Group Call Voice Keep-Alive Heartbeat via phone.CheckGroupCall
-            // This is Telegram's official method to keep voice participants permanently active on the server
-            if (session.call && session.ssrc) {
-              try {
-                const checkRes: any = await session.client.invoke(
-                  new Api.phone.CheckGroupCall({
-                    call: session.call,
-                    sources: [session.ssrc]
-                  })
-                );
-                // If checkRes is returned and is empty or doesn't include our SSRC, re-join instantly
-                if (Array.isArray(checkRes) && (checkRes.length === 0 || !checkRes.includes(session.ssrc))) {
-                  await invokeJoinVoiceWithStrategy(session.client, session.call, session.ssrc, session.liveStreamHash).catch(() => {});
-                  session.lastHeartbeat = Date.now();
-                } else {
-                  session.lastHeartbeat = Date.now();
-                  session.joinedLiveVoice = true;
-                }
-              } catch (checkErr: any) {
-                const cErrMsg = checkErr?.message || String(checkErr);
-                if (
-                  cErrMsg.includes("GROUPCALL_JOIN_MISSING") ||
-                  cErrMsg.includes("GROUPCALL_NOT_PARTICIPANT") ||
-                  cErrMsg.includes("GROUPCALL_INVALID")
-                ) {
-                  // Participant dropped or missing - instantly re-join silently so account NEVER leaves
-                  await invokeJoinVoiceWithStrategy(session.client, session.call, session.ssrc, session.liveStreamHash).catch(() => {});
-                  session.lastHeartbeat = Date.now();
+            // 2. Safe & Non-destructive MTProto Keep-Alive Ping (Every 15-30 seconds)
+            // Note: We DO NOT repeatedly call Api.phone.CheckGroupCall or JoinGroupCall on an already-joined participant!
+            // In Telegram MTProto, a connected participant stays in voice chat as long as the MTProto session remains active.
+            try {
+              await session.client.invoke(new Api.updates.GetState());
+              session.connectionState = "CONNECTED";
+              session.lastHeartbeat = Date.now();
+
+              dbSetLiveConnectionState({
+                account_id: session.accountId,
+                phone: session.phone,
+                state: "CONNECTED",
+                target_live: session.targetLive,
+                last_heartbeat: Date.now()
+              });
+            } catch (pingErr: any) {
+              const pMsg = pingErr?.message || String(pingErr);
+              if (pMsg.includes("AUTH_KEY_UNREGISTERED") || pMsg.includes("SESSION_REVOKED")) {
+                session.connectionState = "DISCONNECTED";
+                const targetAcc = botGlobalState.accounts.find(a => a.id === session.accountId);
+                if (targetAcc) {
+                  targetAcc.status = "authentication_required";
+                  targetAcc.connectionState = "AUTH_REQUIRED";
+                  targetAcc.lastError = pMsg;
+                  savePersistedAccounts(botGlobalState.accounts);
                 }
               }
             }
 
-            // 3. Periodic MTProto Socket State Ping (Every 10-12 seconds)
-            if (heartbeatCounter % 4 === 0) {
-              try {
-                await session.client.invoke(new Api.updates.GetState());
-              } catch (pingErr: any) {
-                const pMsg = pingErr?.message || String(pingErr);
-                if (pMsg.includes("AUTH_KEY_UNREGISTERED") || pMsg.includes("SESSION_REVOKED")) {
-                  const targetAcc = botGlobalState.accounts.find(a => a.id === session.accountId);
-                  if (targetAcc) {
-                    targetAcc.status = "authentication_required";
-                    targetAcc.connectionState = "AUTH_REQUIRED";
-                    targetAcc.lastError = pMsg;
-                    savePersistedAccounts(botGlobalState.accounts);
-                  }
-                }
-              }
-            }
-
-            // 4. Periodic Channel Call Sync (Every 20-25s) - ONLY if the host restarted or changed the call ID
-            if (heartbeatCounter % 8 === 0 && session.peer) {
+            // 3. Periodic Channel Call Sync (Every 60s) - ONLY to detect if the host ended the stream and started a new call
+            if (heartbeatCounter % 4 === 0 && session.peer) {
               try {
                 const fullChannel: any = await session.client.invoke(new Api.channels.GetFullChannel({ channel: session.peer })).catch(() => {});
                 if (fullChannel?.fullChat?.call) {
@@ -448,8 +480,8 @@ export function startLiveKeepAlive() {
                     id: newCall.id,
                     accessHash: newCall.accessHash
                   });
-                  // Only re-join if call ID actually changed (e.g. host ended old stream and started a brand new live stream)
-                  if (!session.call || session.call.id.toString() !== newCall.id.toString()) {
+                  // Only re-join if call ID actually changed to a DIFFERENT call ID
+                  if (session.call && session.call.id.toString() !== newCall.id.toString()) {
                     session.call = newCallInput;
                     const newSsrc = Math.floor(Math.random() * 1000000000) + 100000;
                     session.ssrc = newSsrc;
@@ -466,7 +498,7 @@ export function startLiveKeepAlive() {
     } finally {
       isGuardianLoopRunning = false;
     }
-  }, 2500); // 2.5s ultra-fast active keep-alive guardian loop
+  }, 15000); // 15-second safe, non-destructive keep-alive interval
 }
 
 function stopLiveKeepAlive() {
@@ -945,7 +977,7 @@ export async function executeRealMTProtoJoinLive(
         addBotLog("info", `🔵 [MTProto] ${acc.name} (${acc.phone}) '${peer?.title || cleanTarget}' চ্যানেলে সংযুক্ত হয়েছে।`);
       }
 
-      // Store in active clients map with persistent keepalive parameters
+      // Store in active clients map with persistent keepalive parameters and explicit connection state
       activeLiveClientsMap.set(acc.id, {
         client,
         call: groupCallInput || undefined,
@@ -957,7 +989,23 @@ export async function executeRealMTProtoJoinLive(
         joinedLiveVoice: joinedVoice,
         ssrc: ssrcGenerated,
         liveStreamHash: liveStreamHash || undefined,
-        lastHeartbeat: Date.now()
+        lastHeartbeat: Date.now(),
+        connectionState: "CONNECTED",
+        reconnectAttempts: 0,
+        targetLive: normalizedTarget
+      });
+
+      // Record state in SQLite database
+      dbSetLiveConnectionState({
+        account_id: acc.id,
+        phone: acc.phone,
+        name: acc.name,
+        state: "CONNECTED",
+        target_live: normalizedTarget,
+        joined_voice: joinedVoice ? 1 : 0,
+        connected_at: Date.now(),
+        last_heartbeat: Date.now(),
+        reconnect_attempts: 0
       });
 
       acc.status = "in_live";
@@ -1057,6 +1105,7 @@ export async function executeRealMTProtoLeaveLive(): Promise<{ count: number }> 
   let count = 0;
   for (const [, session] of activeLiveClientsMap.entries()) {
     try {
+      session.connectionState = "MANUAL_LEAVE";
       if (session.call && session.client) {
         await session.client.invoke(
           new Api.phone.LeaveGroupCall({
@@ -1070,6 +1119,7 @@ export async function executeRealMTProtoLeaveLive(): Promise<{ count: number }> 
       console.warn("[MTProto] Leave live note:", e);
     }
   }
+  dbResetLiveConnectionsToManualLeave();
   activeLiveClientsMap.clear();
   const old = botGlobalState.activeLive?.target || "Live";
   botGlobalState.activeLive = null;

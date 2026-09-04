@@ -1,5 +1,13 @@
 import fs from "fs";
 import path from "path";
+import {
+  dbGetAdmins,
+  dbGetAdminByUserIdOrUsername,
+  dbUpsertAdmin,
+  dbDeleteAdmin,
+  dbToggleAdminStatus,
+  mirrorDatabaseToFileVaults
+} from "./database";
 
 export interface AdminController {
   id: string;
@@ -197,26 +205,23 @@ function ensureCoreAdminsPresent(list: AdminController[]): AdminController[] {
   return merged;
 }
 
-// Load saved Admin Controllers from disk cleanly and reliably
+// Load saved Admin Controllers from SQLite database & fallback vaults cleanly and reliably
 export function loadPersistedAdmins(): AdminController[] {
   ensureDataDir();
 
-  // 1. Try primary ADMINS_FILE first
+  // 1. Primary: SQLite Database
   try {
-    if (fs.existsSync(ADMINS_FILE)) {
-      const raw = fs.readFileSync(ADMINS_FILE, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const sanitized = sanitizeAdminRecords(parsed);
-        const finalAdmins = ensureCoreAdminsPresent(sanitized);
-        return finalAdmins;
-      }
+    const dbAdmins = dbGetAdmins();
+    if (Array.isArray(dbAdmins) && dbAdmins.length > 0) {
+      const sanitized = sanitizeAdminRecords(dbAdmins);
+      const finalAdmins = ensureCoreAdminsPresent(sanitized);
+      return finalAdmins;
     }
-  } catch (err) {
-    console.warn("[Storage] Warning loading primary admins file:", err);
+  } catch (dbErr) {
+    console.warn("[Storage] Warning loading admins from SQLite DB:", dbErr);
   }
 
-  // 2. Try ADMINS_VAULT_FILE fallback
+  // 2. Fallback: ADMINS_VAULT_FILE
   try {
     if (fs.existsSync(ADMINS_VAULT_FILE)) {
       const rawVault = fs.readFileSync(ADMINS_VAULT_FILE, "utf-8");
@@ -232,7 +237,22 @@ export function loadPersistedAdmins(): AdminController[] {
     console.warn("[Storage] Warning loading vault admins file:", err);
   }
 
-  // 3. Try Backup fallback
+  // 3. Fallback: primary ADMINS_FILE
+  try {
+    if (fs.existsSync(ADMINS_FILE)) {
+      const raw = fs.readFileSync(ADMINS_FILE, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const sanitized = sanitizeAdminRecords(parsed);
+        const finalAdmins = ensureCoreAdminsPresent(sanitized);
+        return finalAdmins;
+      }
+    }
+  } catch (err) {
+    console.warn("[Storage] Warning loading primary admins file:", err);
+  }
+
+  // 4. Fallback: ADMINS_BACKUP_FILE
   try {
     if (fs.existsSync(ADMINS_BACKUP_FILE)) {
       const rawBak = fs.readFileSync(ADMINS_BACKUP_FILE, "utf-8");
@@ -248,19 +268,27 @@ export function loadPersistedAdmins(): AdminController[] {
     console.error("[Storage] Error loading backup admins file:", err);
   }
 
-  // 4. Default seed with permanent core admins
+  // 5. Default seed with permanent core admins
   const defaultList = [...PERMANENT_CORE_ADMINS];
   savePersistedAdmins(defaultList);
   return defaultList;
 }
 
-// Save Admin Controllers permanently to disk across all vault layers
+// Save Admin Controllers permanently across SQLite database and all file vaults
 export function savePersistedAdmins(admins: AdminController[]): boolean {
   ensureDataDir();
   try {
     const fullList = ensureCoreAdminsPresent(admins);
-    const serialized = JSON.stringify(fullList, null, 2);
 
+    // Write to SQLite Database
+    for (const a of fullList) {
+      try {
+        dbUpsertAdmin(a);
+      } catch (e) {}
+    }
+
+    // Write to redundant JSON files
+    const serialized = JSON.stringify(fullList, null, 2);
     const success1 = atomicWriteFileSync(ADMINS_FILE, serialized);
     try {
       atomicWriteFileSync(ADMINS_BACKUP_FILE, serialized);
@@ -271,12 +299,12 @@ export function savePersistedAdmins(admins: AdminController[]): boolean {
 
     return success1;
   } catch (err) {
-    console.error("[Storage] Failed to save admins to file:", err);
+    console.error("[Storage] Failed to save admins:", err);
     return false;
   }
 }
 
-// Add or update admin permanently
+// Add or update admin permanently in database & file layers
 export function upsertAdminPermanently(admin: AdminController, currentAdmins: AdminController[]): AdminController[] {
   const cleanTgId = cleanTelegramDigits(admin.telegramId);
   const cleanUname = cleanTelegramUsername(admin.username);
@@ -288,6 +316,9 @@ export function upsertAdminPermanently(admin: AdminController, currentAdmins: Ad
     username: cleanUname || admin.username,
     isActive: admin.isActive ?? true
   };
+
+  // Persist directly to SQLite database
+  dbUpsertAdmin(cleanedAdmin);
 
   const freshList = currentAdmins && currentAdmins.length > 0 ? currentAdmins : loadPersistedAdmins();
   const index = freshList.findIndex((a) => {
@@ -316,7 +347,7 @@ export function upsertAdminPermanently(admin: AdminController, currentAdmins: Ad
   return updatedList;
 }
 
-// Sync multiple admins permanently
+// Sync multiple admins permanently across database & file layers
 export function syncAdminsPermanently(incomingAdmins: AdminController[], currentAdmins: AdminController[]): AdminController[] {
   const baseList = currentAdmins && currentAdmins.length > 0 ? currentAdmins : loadPersistedAdmins();
   let merged = [...baseList];
@@ -339,6 +370,9 @@ export function syncAdminsPermanently(incomingAdmins: AdminController[], current
       isActive: inc.isActive ?? true
     };
 
+    // Save to SQLite
+    dbUpsertAdmin(sanitizedInc);
+
     if (exists >= 0) {
       merged[exists] = {
         ...merged[exists],
@@ -358,10 +392,18 @@ export function syncAdminsPermanently(incomingAdmins: AdminController[], current
 export function deleteAdminPermanently(idOrTgId: string, currentAdmins: AdminController[]): AdminController[] {
   const cleanQueryId = cleanTelegramDigits(idOrTgId);
   const cleanQueryUname = cleanTelegramUsername(idOrTgId);
-  const baseList = currentAdmins && currentAdmins.length > 0 ? currentAdmins : loadPersistedAdmins();
 
+  // PROTECT MASTER OWNER
+  if (cleanQueryId === "7983626971" || cleanQueryUname === "thebossbd360" || idOrTgId === "admin-super-owner") {
+    console.warn("[Storage] Owner deletion blocked!");
+    return currentAdmins;
+  }
+
+  // Delete from SQLite
+  dbDeleteAdmin(idOrTgId);
+
+  const baseList = currentAdmins && currentAdmins.length > 0 ? currentAdmins : loadPersistedAdmins();
   const updatedList = baseList.filter((a) => {
-    // Master super admin is untouchable
     if (cleanTelegramDigits(a.telegramId) === "7983626971" || cleanTelegramUsername(a.username) === "thebossbd360") {
       return true;
     }
@@ -378,8 +420,11 @@ export function deleteAdminPermanently(idOrTgId: string, currentAdmins: AdminCon
   return updatedList;
 }
 
-// Toggle admin active status
+// Toggle admin active status permanently
 export function toggleAdminStatusPermanently(id: string, currentAdmins: AdminController[]): AdminController[] {
+  // Toggle in SQLite
+  dbToggleAdminStatus(id);
+
   const baseList = currentAdmins && currentAdmins.length > 0 ? currentAdmins : loadPersistedAdmins();
   const updatedList = baseList.map((a) =>
     a.id === id ? { ...a, isActive: !a.isActive } : a
